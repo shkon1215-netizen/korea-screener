@@ -39,6 +39,8 @@ column-name mismatch produces silent all-NaN merges rather than an error.
 | `main_kr.py` | CLI. Orders filters so slow per-ticker calls run last. |
 | `dashboard.py` | Renders a run into a self-contained HTML dashboard. |
 | `serve.py` | Local server behind the dashboard's Refresh button. |
+| `build_site.py` | Assembles `site/` for GitHub Pages (noindex, no Refresh button). |
+| `dashboard.cmd` | Double-click launcher: starts serve.py and opens the browser. |
 | `check_setup.py` | Pre-flight diagnostic. |
 | `test_korea.py` | Offline tests with planted traps. Keep green. |
 
@@ -186,6 +188,24 @@ Two consequences follow, and neither is a bug:
    practice a semiconductor-equipment screen. Lowering `--min-mcap` widens the
    cohorts; lowering `--min-peers` does not fix it, it just benchmarks against
    noise.
+
+## Publishing
+
+`.github/workflows/screen.yml` runs both boards at 07:30 UTC (16:30 KST) on
+weekdays, builds `site/`, and deploys to GitHub Pages. KOSDAQ is
+`continue-on-error`: a third-party scrape failing should not take the KOSPI
+page down with it.
+
+The published pages have no Refresh button - there is no Python behind static
+hosting - so `build_site.py` replaces it with the rebuild schedule rather than
+showing a control that cannot work. Pages are `noindex, nofollow` plus a
+blanket `robots.txt`: unlisted, not secret.
+
+**Untested until it runs on GitHub:** whether Naver and KIND answer requests
+from an Azure/US runner IP. Both are Korean sites with no published policy on
+this. If the workflow fails at the scrape step, that is the first thing to
+check - the fallbacks are a self-hosted runner on a Korean connection, or
+committing results from a local run instead of scraping in CI.
 
 ## Interpretation
 
