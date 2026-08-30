@@ -1,0 +1,19 @@
+# Environment
+.venv/
+__pycache__/
+*.pyc
+
+# Scrape cache — rebuilt on every run, and per-machine
+.kr_cache/
+
+# Generated results and dashboards. The Actions workflow regenerates these on
+# every run, so committing them only creates merge noise and stale data.
+kr_screen_results.csv
+kr_screen_results_meta.json
+kq_screen_results.csv
+kq_screen_results_meta.json
+kr_dashboard.html
+kq_dashboard.html
+kr_dashboard_artifact.html
+kq_dashboard_artifact.html
+site/

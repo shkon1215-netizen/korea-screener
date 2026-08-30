@@ -1,0 +1,75 @@
+name: Run screen and publish
+
+# KRX closes at 15:30 KST. This runs at 16:30 KST (07:30 UTC), Mon-Fri, which
+# is after the close and after Naver has settled the day's figures. Cron here
+# is UTC and does not observe KST, so the weekday list is shifted accordingly:
+# 07:30 UTC Mon-Fri is 16:30 KST Mon-Fri.
+on:
+  schedule:
+    - cron: "30 7 * * 1-5"
+  workflow_dispatch:        # lets you trigger a run by hand from the Actions tab
+  push:
+    branches: [main]
+    paths-ignore:
+      - "**.md"
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+# A scheduled run and a manual one must not publish over each other.
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt "pandas<3"
+
+      - name: Offline logic check
+        run: python test_korea.py
+
+      # Each board is a separate run with its own outputs. KOSDAQ is allowed to
+      # fail without taking the KOSPI page down with it - a scrape against a
+      # third-party site is not something to bet the whole publish on.
+      - name: Screen KOSPI
+        run: |
+          python main_kr.py --board KOSPI --skip-liquidity --all \
+            --out kr_screen_results.csv --dashboard ""
+
+      - name: Screen KOSDAQ
+        continue-on-error: true
+        run: |
+          python main_kr.py --board KOSDAQ --skip-liquidity --all \
+            --out kq_screen_results.csv --dashboard ""
+
+      - name: Build site
+        run: python build_site.py
+
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: site
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v4
