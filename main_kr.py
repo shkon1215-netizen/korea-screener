@@ -216,6 +216,7 @@ def main() -> int:
             "discount": cfg.discount_threshold,
             "min_metrics": cfg.min_metrics_passing,
             "min_peers": cfg.min_peers,
+            "min_valid_metrics": cfg.min_valid_metrics,
             "min_roe_pct": cfg.min_roe_pct,
             "roe_good_pct": cfg.roe_good_pct,
             "abs_max_pbr": cfg.abs_max_pbr,

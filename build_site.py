@@ -42,9 +42,16 @@ def main() -> int:
         print("no result files found - run main_kr.py first", file=sys.stderr)
         return 1
 
-    if os.path.isdir(SITE):
-        shutil.rmtree(SITE)
-    os.makedirs(SITE)
+    # Empty the folder rather than delete it. On Windows a synced directory
+    # (OneDrive) or a process with it as its cwd holds the directory handle, so
+    # rmdir fails with access denied even when every file inside is removable.
+    os.makedirs(SITE, exist_ok=True)
+    for name in os.listdir(SITE):
+        target = os.path.join(SITE, name)
+        try:
+            shutil.rmtree(target) if os.path.isdir(target) else os.remove(target)
+        except OSError as e:
+            print(f"  could not remove {name}: {e}", file=sys.stderr)
 
     # Only link to boards that actually built, so the switcher never dangles.
     for board, stem, out, _ in available:

@@ -212,6 +212,28 @@ blanket `robots.txt`: unlisted, not secret.
 the scrape steps ever start failing in CI while working locally, since that
 would point at IP-based blocking rather than a code change.
 
+## Adjustable thresholds
+
+The dashboard re-evaluates BOTH screens in the browser. Every input they need
+travels with each row - the three per-metric discounts, PBR, EV/EBITDA, PER,
+ROE, dividend yield, and a `fin` flag for the carve-out - so changing a number
+re-runs the verdict without re-running Python. `evaluate()` in the template
+mirrors `apply_roe_gate` and `apply_absolute_screen`, including the rule that a
+missing value fails a test it is subject to. Settings persist per board in
+localStorage; Reset returns to the published run.
+
+Two things are deliberately NOT adjustable, because they cannot be recomputed
+from the shipped rows:
+
+- **Peer medians.** Fixed when the run built its cohorts. The per-metric
+  discounts can be re-thresholded, but the benchmark behind them cannot move.
+- **Market cap below the run's floor.** Those rows were gated out before
+  scoring (invariant 7) and are simply absent. The control filters upward
+  freely and says so; going lower needs a re-run with `--min-mcap`.
+
+If the client-side verdict at default settings ever disagrees with the Python
+funnel, that is a real bug - they are computing the same thing twice.
+
 ## Interpretation
 
 Sort by `avg_discount`, then read `roe_pct` immediately. Low PBR + high ROE is

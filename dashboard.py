@@ -78,6 +78,13 @@ def _records(df: pd.DataFrame) -> list[dict]:
             "div_yield": _f(r.get("div_yield")),
             "avg_discount": _f(r.get("avg_discount"), 4),
             "metrics_passing": "" if pd.isna(r.get("metrics_passing")) else str(r.get("metrics_passing")),
+            # Per-metric discounts and the financial flag travel with every row
+            # so the page can re-evaluate both screens against thresholds the
+            # reader chooses, instead of only showing the run's own verdict.
+            "disc_pe": _f(r.get("trailing_pe_discount"), 4),
+            "disc_pb": _f(r.get("price_to_book_discount"), 4),
+            "disc_ev": _f(r.get("ev_to_ebitda_discount"), 4),
+            "fin": bool(str(r.get("sector", "") or "").lower().find("financial") >= 0),
             "roe_tier": str(r.get("roe_tier", "")),
             "passes": bool(r.get("passes", False)),
             "screen": str(r.get("screen", "") or ""),
@@ -177,6 +184,7 @@ def build_payload(csv_path: str, meta_path: str, boards: list | None = None) -> 
             "discount": th.get("discount", 0.20),
             "min_metrics": th.get("min_metrics", 2),
             "min_peers": th.get("min_peers", 5),
+            "min_valid": th.get("min_valid_metrics", 2),
             "min_roe": th.get("min_roe_pct", 5.0),
             "roe_good": th.get("roe_good_pct", 10.0),
             "n_total": int(len(df)),
@@ -394,6 +402,26 @@ h1{font-size:clamp(28px,4vw,40px);font-weight:600;letter-spacing:-.02em;margin:6
 .toggle input{accent-color:var(--accent);width:15px;height:15px;cursor:pointer}
 .count{margin-left:auto;font-size:12px;color:var(--ink-3);padding-bottom:8px;
   font-family:var(--mono);font-variant-numeric:tabular-nums}
+.thr .panel-h .hint{display:flex;align-items:center;gap:10px}
+#thrreset{font-family:var(--sans);font-size:11px;font-weight:600;cursor:pointer;
+  padding:4px 10px;border-radius:5px;border:1px solid var(--ring);
+  background:var(--plane);color:var(--ink-2)}
+#thrreset:hover{color:var(--ink);border-color:var(--rule)}
+#thrstate.edited{color:var(--accent);font-weight:600}
+.thrgrid{padding:16px 18px 4px;display:grid;gap:12px 16px;
+  grid-template-columns:repeat(auto-fit,minmax(150px,1fr))}
+.tg{display:flex;flex-direction:column;gap:5px;min-width:0}
+.tg label{font-size:10.5px;font-weight:600;letter-spacing:.08em;
+  text-transform:uppercase;color:var(--ink-3)}
+.tg input{font-family:var(--mono);font-variant-numeric:tabular-nums;font-size:13px;
+  padding:7px 10px;border-radius:6px;border:1px solid var(--rule);
+  background:var(--raise);color:var(--ink);width:100%}
+.tg input:focus{border-color:var(--accent);outline:none}
+.tg input.off{color:var(--ink-3)}
+.thrtoggles{padding:6px 18px 16px;display:flex;flex-wrap:wrap;gap:18px;
+  align-items:center}
+.thrtoggles .toggle{padding-bottom:0}
+.thrnote{font-size:11.5px;color:var(--ink-3);margin-left:auto}
 .tscroll{overflow-x:auto;min-width:0;max-width:100%}
 table{border-collapse:collapse;width:100%;font-size:13px}
 thead th{position:sticky;top:0;z-index:2;background:var(--surface);
@@ -512,14 +540,6 @@ _TEMPLATE = """
       <input type="search" id="q" placeholder="name, code or 업종">
     </div>
     <div class="ctl">
-      <label for="roe">Min ROE <span class="rv" id="roev"></span></label>
-      <input type="range" id="roe" min="-25" max="30" step="1">
-    </div>
-    <div class="ctl">
-      <label for="disc">Min discount <span class="rv" id="discv"></span></label>
-      <input type="range" id="disc" min="-60" max="80" step="5">
-    </div>
-    <div class="ctl">
       <label for="scr">Screen</label>
       <select id="scr">
         <option value="">Either screen</option>
@@ -535,6 +555,43 @@ _TEMPLATE = """
     <label class="toggle"><input type="checkbox" id="onlypass" checked> Passing only</label>
     <label class="toggle"><input type="checkbox" id="nohold"> Hide holdcos</label>
     <span class="count" id="count"></span>
+  </section>
+
+  <section class="panel thr">
+    <div class="panel-h">
+      <h2>Thresholds</h2>
+      <span class="hint">
+        <span id="thrstate">showing the published run</span>
+        <button type="button" id="thrreset">Reset</button>
+      </span>
+    </div>
+    <div class="thrgrid">
+      <div class="tg"><label for="t_mcap_lo">Market cap min $m</label>
+        <input type="number" id="t_mcap_lo" min="0" step="50"></div>
+      <div class="tg"><label for="t_mcap_hi">Market cap max $m</label>
+        <input type="number" id="t_mcap_hi" min="0" step="50" placeholder="none"></div>
+      <div class="tg"><label for="t_pbr">PBR below</label>
+        <input type="number" id="t_pbr" min="0" step="0.1"></div>
+      <div class="tg"><label for="t_ev">EV/EBITDA below</label>
+        <input type="number" id="t_ev" min="0" step="0.5"></div>
+      <div class="tg"><label for="t_per">PER below</label>
+        <input type="number" id="t_per" min="0" step="1" placeholder="off"></div>
+      <div class="tg"><label for="t_roe">ROE at least %</label>
+        <input type="number" id="t_roe" step="1"></div>
+      <div class="tg"><label for="t_div">Dividend at least %</label>
+        <input type="number" id="t_div" min="0" step="0.5"></div>
+      <div class="tg"><label for="t_coe">Cost of equity %</label>
+        <input type="number" id="t_coe" min="1" step="0.5"></div>
+      <div class="tg"><label for="t_disc">Discount at least %</label>
+        <input type="number" id="t_disc" step="5"></div>
+      <div class="tg"><label for="t_nmet">…on at least N metrics</label>
+        <input type="number" id="t_nmet" min="1" max="3" step="1"></div>
+    </div>
+    <div class="thrtoggles">
+      <label class="toggle"><input type="checkbox" id="t_fair"> Require PBR below fair value</label>
+      <label class="toggle"><input type="checkbox" id="t_carve"> Financials qualify on PBR + ROE</label>
+      <span class="thrnote" id="mcapnote"></span>
+    </div>
   </section>
 
   <section class="panel">
@@ -619,15 +676,30 @@ $("mp").textContent = M.min_peers;
 }
 
 /* ---- tiles ----------------------------------------------------------- */
+function median(xs) {
+  const v = xs.filter(x => x !== null && x !== undefined).sort((a, b) => a - b);
+  if (!v.length) return null;
+  const m = Math.floor(v.length / 2);
+  return v.length % 2 ? v[m] : (v[m - 1] + v[m]) / 2;
+}
+
 function paintTiles() {
+const live = D.rows.filter(r => r.cap);
+const anyp = live.filter(r => r.ev.any);
+const rel = live.filter(r => r.ev.rel), absl = live.filter(r => r.ev.abs);
+const both = live.filter(r => r.ev.screen === "both");
+const mRoe = median(anyp.map(r => r.roe_pct));
+const mDisc = median(rel.map(r => r.avg_discount));
+const capLabel = T.mcap_hi ? `$${T.mcap_lo ?? 0}m–$${T.mcap_hi}m`
+                           : `$${T.mcap_lo ?? 0}m+`;
 const tiles = [
-  {k:"Passing either", v:M.n_passing,
-   n:`${M.n_relative} relative · ${M.n_absolute} absolute · ${M.n_both} both`},
-  {k:"Median discount", v:M.med_disc===null?"—":(M.med_disc*100).toFixed(0)+"%",
-   n:`relative screen: ${(M.discount*100).toFixed(0)}%+ below peers on ${M.min_metrics}+ metrics`},
-  {k:"Median ROE", v:M.med_roe===null?"—":M.med_roe.toFixed(1)+"%",
-   n:`floor is ${M.min_roe}%, target ${M.roe_good}%+`},
-  {k:"Size floor", v:"$"+M.min_mcap_musd+"m", n:M.skip_liquidity?"liquidity gate skipped":"liquidity gate applied"},
+  {k:"Passing either", v:anyp.length,
+   n:`${rel.length} relative · ${absl.length} absolute · ${both.length} both`},
+  {k:"Median discount", v:mDisc===null?"—":(mDisc*100).toFixed(0)+"%",
+   n:`relative: ${T.disc===null?"any":T.disc+"%"}+ below peers on ${T.nmet}+ metrics`},
+  {k:"Median ROE", v:mRoe===null?"—":mRoe.toFixed(1)+"%",
+   n:T.roe===null?"no ROE floor":`floor ${T.roe}%, target ${M.roe_good}%+`},
+  {k:"Market cap", v:capLabel, n:`${live.length} of ${D.rows.length} names in range`},
 ];
 $("tiles").innerHTML = tiles.map(t =>
   `<div class="tile"><span class="k">${t.k}</span><span class="v">${t.v}</span>
@@ -636,7 +708,20 @@ $("tiles").innerHTML = tiles.map(t =>
 
 /* ---- funnel ---------------------------------------------------------- */
 function paintFunnel() {
-$("funnel").innerHTML = D.funnel.map((s, i) => {
+/* The first stages describe what Python did and are fixed. The last three
+   depend on the current thresholds, so they are recomputed - otherwise the
+   funnel would contradict the tiles above it. */
+const live = D.rows.filter(r => r.cap);
+const overrides = {
+  "Cleared size gate": live.length,
+  "Scored against peers": live.length,
+  "Cheap vs peers": live.filter(r => r.ev.rel).length,
+  "…and earning its keep": live.filter(r => r.ev.any).length,
+};
+const top = D.funnel.length ? D.funnel[0].n : 1;
+$("funnel").innerHTML = D.funnel.map((s0, i) => {
+  const n = overrides[s0.label] !== undefined ? overrides[s0.label] : s0.n;
+  const s = {...s0, n, pct: top ? n / top * 100 : 0};
   const w = Math.max(s.pct, 4), inside = w >= 18;
   return `
   <div class="fstep">
@@ -659,11 +744,29 @@ $("drops").innerHTML = D.drops.length
 
 /* ---- absolute tests --------------------------------------------------- */
 function paintTests() {
-  $("tests").innerHTML = (D.abs_tests || []).map(t =>
-    `<li><span><span class="tick">✓</span>${t.label}</span><b>${t.n}</b></li>`).join("")
-    + `<li class="total"><span>All of them together</span><b>${M.n_absolute}</b></li>`;
-  $("absnote").innerHTML = M.n_carveout
-    ? `<span class="drop"><b>${M.n_carveout}</b> financials qualified on PBR and ROE `
+  const live = D.rows.filter(r => r.cap);
+  const n = (f) => live.filter(f).length;
+  const tests = [];
+  if (T.pbr !== null) tests.push(["PBR below " + T.pbr, n(r => r.ev.tests.pbr)]);
+  if (T.ev !== null) tests.push(["EV/EBITDA below " + T.ev, n(r => r.ev.tests.ev)]);
+  if (T.per !== null) tests.push(["PER below " + T.per,
+    n(r => r.trailing_pe !== null && r.trailing_pe < T.per)]);
+  if (T.fair) tests.push([`PBR below fair value (ROE ÷ ${T.coe}% CoE)`,
+    n(r => r.ev.tests.fair)]);
+  if (T.div !== null) tests.push(["Dividend yield " + T.div + "% or better",
+    n(r => r.ev.tests.div)]);
+  if (T.roe !== null) tests.push(["ROE " + T.roe + "% or better", n(r => r.ev.tests.roe)]);
+
+  $("tests").innerHTML = (tests.length
+    ? tests.map(([l, c]) =>
+        `<li><span><span class="tick">✓</span>${l}</span><b>${c}</b></li>`).join("")
+    : '<li><span style="color:var(--ink-3)">No absolute tests active</span><b>—</b></li>')
+    + `<li class="total"><span>All of them together</span>`
+    + `<b>${n(r => r.ev.abs)}</b></li>`;
+
+  const carved = n(r => r.ev.abs && r.ev.carved);
+  $("absnote").innerHTML = carved
+    ? `<span class="drop"><b>${carved}</b> financials qualified on PBR and ROE `
       + `alone — they have no EV/EBITDA to test</span>`
     : "";
 }
@@ -680,6 +783,7 @@ function paintBoards() {
 }
 
 function paintAll() {
+  evaluateAll();
   paintHeader(); paintTiles(); paintFunnel(); paintTests(); paintBoards(); render();
 }
 
@@ -696,13 +800,112 @@ $("thead").querySelectorAll("th").forEach(th => th.addEventListener("click", () 
   render();
 }));
 
-/* Both sliders start wide open. avg_discount averages across every metric with
-   data, so a name can clear the screen on two metrics and still show a negative
-   average (BGF리테일 does). Defaulting the slider to the screen's own threshold
-   would hide such a row and make the table disagree with the "passing" tile. */
-const ROE_OFF = +$("roe").min, DISC_OFF = +$("disc").min;
-$("roe").value = ROE_OFF;
-$("disc").value = DISC_OFF;
+/* ---- thresholds: the screen re-evaluated in the browser ---------------
+   Every input both screens need travels with each row, so changing a number
+   here re-runs the verdict without re-running Python. Two things genuinely
+   cannot be recomputed and are therefore not offered: peer medians (fixed
+   when the run built its cohorts) and any market cap BELOW the run's floor,
+   because those rows were gated out before scoring and are simply absent. */
+const THR_KEYS = ["mcap_lo","mcap_hi","pbr","ev","per","roe","div","coe",
+                  "disc","nmet","fair","carve"];
+const STORE = "kr-thresholds-" + (M.board || "x");
+let T = {};
+
+function defaults() {
+  return {
+    mcap_lo: M.min_mcap_musd, mcap_hi: null,
+    pbr: M.abs_max_pbr, ev: M.abs_max_ev, per: null,
+    roe: M.min_roe, div: M.abs_min_div, coe: M.coe,
+    disc: Math.round(M.discount * 100), nmet: M.min_metrics,
+    fair: true, carve: (M.n_carveout || 0) > 0 || true,
+  };
+}
+
+const numOrNull = (el) => el.value.trim() === "" ? null : Number(el.value);
+
+function readControls() {
+  T = {
+    mcap_lo: numOrNull($("t_mcap_lo")), mcap_hi: numOrNull($("t_mcap_hi")),
+    pbr: numOrNull($("t_pbr")), ev: numOrNull($("t_ev")),
+    per: numOrNull($("t_per")), roe: numOrNull($("t_roe")),
+    div: numOrNull($("t_div")), coe: numOrNull($("t_coe")) || 10,
+    disc: numOrNull($("t_disc")), nmet: numOrNull($("t_nmet")) || 1,
+    fair: $("t_fair").checked, carve: $("t_carve").checked,
+  };
+  ["t_per","t_mcap_hi"].forEach(id => $(id).classList.toggle("off", !numOrNull($(id))));
+  try { localStorage.setItem(STORE, JSON.stringify(T)); } catch (e) {}
+  const d = defaults();
+  const edited = THR_KEYS.some(k => String(T[k]) !== String(d[k]));
+  $("thrstate").textContent = edited ? "modified — not the published screen"
+                                     : "showing the published run";
+  $("thrstate").classList.toggle("edited", edited);
+}
+
+function writeControls(v) {
+  $("t_mcap_lo").value = v.mcap_lo ?? "";
+  $("t_mcap_hi").value = v.mcap_hi ?? "";
+  $("t_pbr").value = v.pbr ?? "";
+  $("t_ev").value = v.ev ?? "";
+  $("t_per").value = v.per ?? "";
+  $("t_roe").value = v.roe ?? "";
+  $("t_div").value = v.div ?? "";
+  $("t_coe").value = v.coe ?? 10;
+  $("t_disc").value = v.disc ?? "";
+  $("t_nmet").value = v.nmet ?? 2;
+  $("t_fair").checked = !!v.fair;
+  $("t_carve").checked = !!v.carve;
+}
+
+/* One row against the current thresholds. Mirrors korea_filters.apply_roe_gate
+   and apply_absolute_screen, including the rule that a missing value fails a
+   test it is subject to - unknown is not the same as passing. */
+function evaluate(r) {
+  const ds = [r.disc_pe, r.disc_pb, r.disc_ev].filter(d => d !== null);
+  const nPass = T.disc === null ? ds.length
+              : ds.filter(d => d >= T.disc / 100).length;
+  const roeOk = T.roe === null || (r.roe_pct !== null && r.roe_pct >= T.roe);
+  const rel = ds.length >= (M.min_valid || 2) && nPass >= T.nmet && roeOk;
+
+  const pbrOk = T.pbr === null || (r.price_to_book !== null && r.price_to_book < T.pbr);
+  const evOk  = T.ev  === null || (r.ev_to_ebitda !== null && r.ev_to_ebitda < T.ev);
+  const perOk = T.per === null || (r.trailing_pe !== null && r.trailing_pe < T.per);
+  const divOk = T.div === null || (r.div_yield !== null && r.div_yield >= T.div);
+  const fairOk = !T.fair || (r.price_to_book !== null && r.roe_pct !== null
+                             && r.price_to_book < r.roe_pct / T.coe);
+  let core = pbrOk && evOk;
+  let carved = false;
+  if (T.carve && r.fin && pbrOk && !evOk) { core = true; carved = true; }
+  const abs = core && perOk && roeOk && divOk && fairOk;
+
+  return {rel, abs, carved,
+          screen: rel && abs ? "both" : rel ? "relative" : abs ? "absolute" : "",
+          any: rel || abs,
+          tests: {pbr: pbrOk, ev: evOk, fair: fairOk, div: divOk, roe: roeOk}};
+}
+
+function inCap(r) {
+  if (T.mcap_lo !== null && (r.mcap_musd === null || r.mcap_musd < T.mcap_lo)) return false;
+  if (T.mcap_hi !== null && (r.mcap_musd === null || r.mcap_musd > T.mcap_hi)) return false;
+  return true;
+}
+
+/* Start from the published run's own thresholds, unless this browser already
+   has a saved set for this board. */
+(function initThresholds() {
+  let saved = null;
+  try { saved = JSON.parse(localStorage.getItem(STORE) || "null"); } catch (e) {}
+  writeControls(saved || defaults());
+  readControls();
+  $("thrreset").addEventListener("click", () => {
+    writeControls(defaults()); readControls(); paintAll();
+  });
+  THR_KEYS.forEach(k => $("t_" + k).addEventListener("input", () => {
+    readControls(); paintAll();
+  }));
+  $("mcapnote").textContent =
+    "Below $" + M.min_mcap_musd + "m there is no data — those names were gated "
+    + "out before scoring. Re-run with a lower --min-mcap to reach further down.";
+})();
 
 function discColor(d) {
   if (d === null || d < 0) return "var(--ink-3)";
@@ -723,9 +926,9 @@ function cell(r, k) {
   }
   if (k === "industry") return `<span class="ind">${esc(v || "—")}</span>`;
   if (k === "screen") {
-    const s = v || "none";
+    const s = r.ev.screen || "none";
     const lab = s === "none" ? "—" : s;
-    const star = r.carveout ? ' <span class="tag">pbr+roe</span>' : "";
+    const star = r.ev.carved ? ' <span class="tag">pbr+roe</span>' : "";
     return `<span class="sbadge ${s}">${lab}</span>${star}`;
   }
   if (k === "metrics_passing") return v ? esc(v) : '<span class="na">—</span>';
@@ -748,23 +951,24 @@ function cell(r, k) {
   return v.toFixed(2);
 }
 
+/* Re-evaluated on every threshold change and cached on the row, so the tiles,
+   the tests panel, the funnel tail and the table all read one verdict. */
+function evaluateAll() {
+  D.rows.forEach(r => { r.ev = evaluate(r); r.cap = inCap(r); });
+}
+
 function render() {
   const q = $("q").value.trim().toLowerCase();
-  const roeRaw = +$("roe").value, discRaw = +$("disc").value;
-  const roeOn = roeRaw > ROE_OFF, discOn = discRaw > DISC_OFF;
   const brd = $("brd").value;
   const onlyPass = $("onlypass").checked, noHold = $("nohold").checked;
-  $("roev").textContent = roeOn ? roeRaw + "%" : "off";
-  $("discv").textContent = discOn ? discRaw + "%" : "off";
-
   const scr = $("scr").value;
+
   let rows = D.rows.filter(r => {
-    if (onlyPass && !r.passes_any) return false;
-    if (scr && r.screen !== scr) return false;
+    if (!r.cap) return false;
+    if (onlyPass && !r.ev.any) return false;
+    if (scr && r.ev.screen !== scr) return false;
     if (noHold && r.holdco) return false;
     if (brd && r.board !== brd) return false;
-    if (roeOn && (r.roe_pct === null || r.roe_pct < roeRaw)) return false;
-    if (discOn && (r.avg_discount === null || r.avg_discount < discRaw / 100)) return false;
     if (q && !(r.name.toLowerCase().includes(q) || r.ticker.includes(q)
         || (r.industry || "").toLowerCase().includes(q))) return false;
     return true;
@@ -785,13 +989,15 @@ function render() {
   });
 
   $("tbody").innerHTML = rows.map(r =>
-    `<tr class="${r.passes_any ? "" : "miss"}">`
+    `<tr class="${r.ev.any ? "" : "miss"}">`
     + D.cols.map(c => `<td class="${c.a}">${cell(r, c.k)}</td>`).join("") + "</tr>").join("");
   $("empty").hidden = rows.length > 0;
-  $("count").textContent = rows.length + " of " + D.rows.length + " shown";
+  const inCapN = D.rows.filter(r => r.cap).length;
+  $("count").textContent = rows.length + " of " + inCapN + " shown"
+    + (inCapN < D.rows.length ? ` (${D.rows.length - inCapN} outside the cap range)` : "");
 }
 
-["q","roe","disc","brd","scr","onlypass","nohold"].forEach(id =>
+["q","brd","scr","onlypass","nohold"].forEach(id =>
   $(id).addEventListener("input", render));
 
 /* ---- live refresh ----------------------------------------------------
