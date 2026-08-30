@@ -191,6 +191,12 @@ Two consequences follow, and neither is a bug:
 
 ## Publishing
 
+Live: https://shkon1215-netizen.github.io/korea-screener/ (KOSDAQ at
+`/kosdaq.html`). Unlisted - `noindex` plus a blanket `robots.txt` - but the
+repo itself is public, which free Pages requires. No screen output is
+committed; results are regenerated on every run.
+
+
 `.github/workflows/screen.yml` runs both boards at 07:30 UTC (16:30 KST) on
 weekdays, builds `site/`, and deploys to GitHub Pages. KOSDAQ is
 `continue-on-error`: a third-party scrape failing should not take the KOSPI
@@ -201,11 +207,10 @@ hosting - so `build_site.py` replaces it with the rebuild schedule rather than
 showing a control that cannot work. Pages are `noindex, nofollow` plus a
 blanket `robots.txt`: unlisted, not secret.
 
-**Untested until it runs on GitHub:** whether Naver and KIND answer requests
-from an Azure/US runner IP. Both are Korean sites with no published policy on
-this. If the workflow fails at the scrape step, that is the first thing to
-check - the fallbacks are a self-hosted runner on a Korean connection, or
-committing results from a local run instead of scraping in CI.
+**Naver and KIND do answer GitHub's runners** - confirmed on run #1,
+2026-08-30, both boards scraped clean from an Azure/US IP. Worth re-checking if
+the scrape steps ever start failing in CI while working locally, since that
+would point at IP-based blocking rather than a code change.
 
 ## Interpretation
 
