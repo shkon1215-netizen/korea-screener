@@ -34,7 +34,7 @@ column-name mismatch produces silent all-NaN merges rather than an error.
 | `screener.py` | Core engine. `sanitize_metrics`, `compute_peer_benchmarks`, `score` are market-agnostic. |
 | `config_kr.py` | Thresholds, metric bounds, share-class detection rules. |
 | `providers_kr.py` | pykrx (primary) + yfinance (industry, EV/EBITDA). Needs `KRX_ID`/`KRX_PW`. |
-| `providers_naver_kr.py` | Fallback source: KIND (roster + 업종) + Naver (cross-section). No account. |
+| `providers_naver_kr.py` | Fallback source: Naver mobile JSON API + KIND 업종. No account. |
 | `korea_filters.py` | Korea share-class hygiene, ROE, value-up flags. |
 | `main_kr.py` | CLI. Orders filters so slow per-ticker calls run last. |
 | `dashboard.py` | Renders a run into a self-contained HTML dashboard. |
@@ -106,13 +106,13 @@ column-name mismatch produces silent all-NaN merges rather than an error.
    highest-value upgrade available.
 2. **EV/EBITDA is unreliable** — KRX doesn't publish it. OpenDART (free, API
    key) gives full financial statements to compute it properly.
-3. **관리종목 is filtered; 거래정지 is not.** KIND publishes the
-   administrative-issue list free (`fetch_admin_issue_names`), but by company
-   NAME only - there is no 종목코드 in the markup, so matching is by exact
-   name and a renamed company slips through. No unauthenticated endpoint was
-   found for 거래정지 (trading halt). At a USD 600m floor the 관리종목 filter
-   removes ~30 roster names and none that reach scoring; it starts to matter
-   as soon as `--min-mcap` comes down.
+3. **관리종목 and 거래정지 are both filtered now.** Halt status arrives per row
+   as `tradeStopType` on the market-value API and matches on ticker, so
+   `apply_halt_filter` is exact (KOSPI 25, KOSDAQ 81). 관리종목 still comes
+   from KIND by company NAME only, so a renamed company can still slip that
+   one. A suspended line carries a stale last price and would otherwise be
+   screened as if live.
+
 4. `pbr_bottom20_industry` is a **current cross-section only**. The KRX
    low-PBR disclosure criterion requires two consecutive periods — needs
    history accumulated from dated runs.
@@ -188,6 +188,46 @@ Two consequences follow, and neither is a bug:
    practice a semiconductor-equipment screen. Lowering `--min-mcap` widens the
    cohorts; lowering `--min-peers` does not fix it, it just benchmarks against
    noise.
+
+## Naver moved, September 2026
+
+The HTML scrape of `finance.naver.com/sise/sise_market_sum` died between
+2026-09-10 and 09-11: Naver replaced that page with a client-rendered app.
+The request still returns **HTTP 200 with a full-looking document** - there is
+simply no `<table>` in it. Scheduled run #12 failed; #11 was the last good one.
+If a scrape ever "succeeds" but yields zero rows, check for this shape of
+failure before assuming a network or rate-limit problem.
+
+Replaced by `m.stock.naver.com/api/stocks/marketValue/{board}` (JSON, 100 per
+page). It is better than what it replaced on every axis: exact KRW rather than
+rounded 억원, real 거래대금 rather than a volume x close proxy, `stockEndType`
+separating stocks from ETFs and ETNs without needing KIND for it, and
+`tradeStopType` per row, which closed known gap #3.
+
+The one thing it does NOT carry is per-share fundamentals. PER, PBR, EPS, BPS,
+ROE and DPS now come per ticker from `m.stock.naver.com/api/stock/{code}/
+finance/annual`, after the size gate - invariant 7 still holds, because the
+gate itself runs on the cheap cross-sectional call. PER and PBR are struck
+against today's close over the latest reported EPS/BPS rather than taken from
+Naver's year-end figures.
+
+## Three-year history
+
+`fetch_financials` returns revenue, operating profit and net profit for the
+last three filed years plus EBITDA, all in 억원 oldest-first, with a compound
+rate per metric.
+
+- **Consensus periods are dropped.** The API flags forecasts with
+  `isConsensus: "Y"`; including them would report analyst estimates as history.
+- **EBITDA is not in Naver's data at all** - there is no depreciation line - so
+  it comes from yfinance's income statement. The check that the two sources
+  describe the same company: yfinance's operating income matches Naver's
+  영업이익 exactly (삼성전자 2025, 436,011억 in both). Banks have no EBITDA in
+  either, consistent with invariant 6.
+- **CAGR is undefined when the starting year is zero or negative**, and is
+  reported as missing rather than as a number with a meaningless sign. 55 of
+  240 KOSPI names hit this. The yearly figures always ship alongside the rate,
+  so a turnaround like 한국전력 (-47,161억 -> +86,667억) is still visible.
 
 ## Publishing
 

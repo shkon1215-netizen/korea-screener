@@ -7,30 +7,35 @@ behind an account (KRX_ID / KRX_PW). Logged out it answers HTTP 400 with the
 body 'LOGOUT', which pykrx surfaces as a KeyError on a Korean column name.
 This module reaches the same numbers without an account:
 
-  - roster + industry -> kind.krx.co.kr corpList.do  (KRX's own disclosure
-    portal, not gated). Ships 업종, the KRX industry classification, which is
-    a genuine upgrade over the yfinance `industry` the KRX path relies on.
-  - price / market cap / PER / PBR / ROE / DPS -> finance.naver.com
-    sise_market_sum, 50 names per page, ~20 pages per board.
+  - roster, price, market cap, traded value, halt status -> Naver's mobile
+    API, m.stock.naver.com/api/stocks/marketValue/{board}, 100 per page.
+  - industry -> kind.krx.co.kr corpList.do (KRX's own disclosure portal, not
+    gated). Ships 업종, a genuine upgrade over the yfinance `industry` the KRX
+    path relies on.
+  - per-share fundamentals + 3y history -> m.stock.naver.com per ticker.
+  - EBITDA -> yfinance (Naver publishes no depreciation line anywhere).
   - trading calendar -> pykrx get_market_ohlcv, which runs off a different
     backend and keeps working while logged out.
 
+The HTML scrape of finance.naver.com/sise/sise_market_sum died in Sept 2026,
+when Naver moved that page to a client-rendered app: the request still returns
+200 with a full-looking document, but there is no <table> in it at all. The
+JSON API that replaced it is better on every axis - exact KRW instead of
+rounded 억원, real 거래대금 instead of a volume x close proxy, security type so
+ETFs need no second source to identify, and per-row halt status.
+
 Deliberate differences from KRXProvider, all of them visible in the output:
 
-  1. The Naver cross-section is LIVE, not as-of a date. `date` arguments are
-     accepted for interface compatibility and ignored; `asof` in the log is
-     the last completed session, but the multiples are current.
-  2. Naver publishes 거래량 (shares), not 거래대금 (value). Traded value is
-     reconstructed as volume x close. Good enough for a liquidity gate,
-     not a substitute for KRX's own figure.
-  3. EPS and BPS are derived as close/PER and close/PBR rather than reported.
-     That is an identity, and it keeps ROE consistent with the very multiples
-     being screened - which is exactly the property CLAUDE.md wants from ROE.
-     Naver's own reported ROE is carried alongside as `naver_roe_pct`.
+  1. The cross-section is LIVE, not as-of a date. `date` arguments are accepted
+     for interface compatibility and ignored; `asof` in the log is the last
+     completed session, but the prices are current.
+  2. PER and PBR are struck against today's close over the latest reported EPS
+     and BPS, not taken from Naver's own year-end figures. That keeps them
+     consistent with the price the screen is actually looking at.
 
-Invariant 7 is preserved: everything here is cross-sectional and cheap. The
-only per-ticker work is EV/EBITDA enrichment, which still runs last and only
-on names that already cleared the size gate.
+Invariant 7 is preserved: the size gate still runs on cheap cross-sectional
+data. Per-ticker work - fundamentals, 3y history, EV/EBITDA - runs after it,
+on survivors only.
 """
 from __future__ import annotations
 
@@ -52,6 +57,7 @@ log = logging.getLogger(__name__)
 UA = ("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
       "(KHTML, like Gecko) Chrome/126.0 Safari/537.36")
 
+NAVER_MKT = "https://m.stock.naver.com/api/stocks/marketValue/{board}"
 NAVER_LIST = "https://finance.naver.com/sise/sise_market_sum.naver"
 NAVER_FIELDS = "https://finance.naver.com/sise/field_submit.naver"
 KIND_LIST = "https://kind.krx.co.kr/corpgeneral/corpList.do"
@@ -105,6 +111,155 @@ def fetch_admin_issue_names() -> set[str]:
         return set()
 
 
+NAVER_FIN = "https://m.stock.naver.com/api/stock/{code}/finance/annual"
+MOBILE_UA = ("Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) "
+             "AppleWebKit/605.1.15 (KHTML, like Gecko) Mobile/15E148 Safari/604.1")
+
+# Naver's row titles -> our short names. 당기순이익 is the headline figure and
+# includes non-controlling interests; 지배주주순이익 sits beside it if you ever
+# need the EPS-consistent basis instead.
+FIN_ROWS = {"매출액": "rev", "영업이익": "op", "당기순이익": "np"}
+
+# Latest-year per-share figures. PER and PBR are deliberately NOT taken from
+# here: Naver's are struck at the fiscal year end, and the screen needs them
+# against today's price. main_kr recomputes them as close/EPS and close/BPS.
+FIN_LATEST = {"EPS": "trailing_eps", "BPS": "book_value_ps",
+              "주당배당금": "dps", "ROE": "naver_roe_pct"}
+
+
+def _fin_num(v) -> float:
+    """Naver ships '3,336,059' in 억원, and '-' or '' for a period with no
+    filing. Both of those are missing, and neither is zero."""
+    s = str(v).strip().replace(",", "")
+    if not s or s in ("-", "N/A", "None", "nan"):
+        return np.nan
+    return _num(s)
+
+
+def cagr(values: list[float]) -> float:
+    """Compound annual growth across the span the values actually cover.
+
+    Undefined when the base is zero or negative - a company that lost money
+    three years ago and makes money now has no meaningful growth *rate*, and
+    inventing one (or flipping its sign) is worse than reporting nothing. The
+    yearly figures are always shipped alongside, so nothing is hidden by this.
+    """
+    vals = [v for v in values if v is not None and np.isfinite(v)]
+    if len(vals) < 2 or vals[0] <= 0 or vals[-1] <= 0:
+        return np.nan
+    return (vals[-1] / vals[0]) ** (1.0 / (len(vals) - 1)) - 1.0
+
+
+def fetch_financials(tickers: list[str], cache=None, delay: float = 0.12,
+                     workers: int = 6, years: int = 3) -> pd.DataFrame:
+    """Three years of revenue, operating profit, net profit and EBITDA.
+
+    Revenue/operating/net come from Naver's mobile API, which flags analyst
+    forecasts with `isConsensus: "Y"` - those are dropped, so only filed
+    actuals are reported. CLAUDE.md's "no forward estimates" rule applies here
+    as much as to the multiples.
+
+    EBITDA is NOT in that payload and cannot be derived from it: Naver
+    publishes no depreciation line. It comes from yfinance's income statement
+    instead, whose operating income reconciles exactly with Naver's 영업이익
+    (삼성전자 2025: 436,011억 in both), which is the check that says the two
+    sources are describing the same company.
+
+    Per-ticker and therefore slow, so call it LAST on survivors only -
+    invariant 7.
+    """
+    import yfinance as yf
+    from concurrent.futures import ThreadPoolExecutor, as_completed
+
+    sess = requests.Session()
+    sess.headers.update({"User-Agent": MOBILE_UA,
+                         "Referer": "https://m.stock.naver.com/"})
+
+    def naver_part(code: str) -> dict:
+        r = sess.get(NAVER_FIN.format(code=code), timeout=25)
+        r.raise_for_status()
+        info = (r.json() or {}).get("financeInfo") or {}
+        actual = [t["key"] for t in info.get("trTitleList", [])
+                  if t.get("isConsensus") != "Y"]
+        actual = sorted(actual)[-years:]
+        out = {"fin_years": ",".join(a[:4] for a in actual), "fin_n": len(actual)}
+        newest = actual[-1] if actual else None
+        for row in info.get("rowList", []):
+            title = row.get("title")
+            cols = row.get("columns", {})
+            key = FIN_ROWS.get(title)
+            if key:
+                series = [_fin_num(cols.get(p, {}).get("value")) for p in actual]
+                for i, v in enumerate(series, 1):
+                    out[f"{key}_y{i}"] = v
+                out[f"{key}_cagr"] = cagr(series)
+            latest = FIN_LATEST.get(title)
+            if latest and newest:
+                out[latest] = _fin_num(cols.get(newest, {}).get("value"))
+        return out
+
+    def ebitda_part(code: str) -> dict:
+        for suffix in (".KS", ".KQ"):
+            try:
+                stmt = yf.Ticker(f"{code}{suffix}").income_stmt
+                if stmt is None or stmt.empty:
+                    continue
+                row = next((i for i in stmt.index if str(i) == "EBITDA"), None)
+                if row is None:
+                    row = next((i for i in stmt.index
+                                if "Normalized EBITDA" in str(i)), None)
+                if row is None:
+                    continue
+                # Newest column first; flip to oldest-first and convert to 억원
+                # so it sits on the same scale as everything from Naver.
+                cols = list(stmt.columns)[:years][::-1]
+                series = [_num(stmt.loc[row, c]) / 1e8 for c in cols]
+                out = {f"ebitda_y{i}": v for i, v in enumerate(series, 1)}
+                out["ebitda_cagr"] = cagr(series)
+                return out
+            except Exception:
+                continue
+        return {}
+
+    def one(code: str) -> dict:
+        if cache is not None:
+            hit = cache.get(f"fin_{code}")
+            if hit:
+                return {**hit, "ticker": code}
+        rec = {"ticker": code}
+        try:
+            time.sleep(delay)
+            rec.update(naver_part(code))
+        except Exception as e:
+            log.debug("financials failed for %s: %s", code, e)
+        try:
+            rec.update(ebitda_part(code))
+        except Exception:
+            pass
+        if cache is not None:
+            cache.set(f"fin_{code}", {k: (None if (isinstance(v, float) and not
+                                                   np.isfinite(v)) else v)
+                                      for k, v in rec.items() if k != "ticker"})
+        return rec
+
+    out, failed = [], 0
+    with ThreadPoolExecutor(max_workers=workers) as ex:
+        futs = [ex.submit(one, t) for t in tickers]
+        for i, f in enumerate(as_completed(futs), 1):
+            rec = f.result()
+            if not rec.get("fin_n"):
+                failed += 1
+            out.append(rec)
+            if i % 50 == 0:
+                log.info("financials %d/%d", i, len(tickers))
+    if tickers and failed > len(tickers) * 0.3:
+        # Naver answered 30/30 in testing, so a high failure rate means
+        # throttling or a changed payload, not ordinary missing filings.
+        log.warning("financials missing for %d of %d names - check for "
+                    "rate limiting or an API change", failed, len(tickers))
+    return pd.DataFrame(out)
+
+
 def _fin_sector(industry: str) -> str:
     s = str(industry)
     return "Financial Services" if any(t in s for t in _FIN_TOKENS) else ""
@@ -154,49 +309,48 @@ class NaverKindProvider:
         return days[-n:]
 
     # -- Naver cross-section -------------------------------------------
-    def _set_fields(self, sosok: str) -> None:
-        params = ([("menu", "market_sum"),
-                   ("returnUrl", f"{NAVER_LIST}?sosok={sosok}")]
-                  + [("fieldIds", f) for f in FIELD_IDS])
-        self.s.get(NAVER_FIELDS, params=params,
-                   headers={"Referer": NAVER_LIST}, timeout=40)
-
     def _board_pages(self, board: str) -> pd.DataFrame:
-        from bs4 import BeautifulSoup
-        sosok = BOARD_SOSOK[board]
-        self._set_fields(sosok)
+        """One JSON page per 100 names off Naver's mobile API.
 
+        Replaced the old sise_market_sum HTML scrape in Sept 2026, when Naver
+        moved that page to a client-rendered app and the table stopped existing
+        in the HTML. The JSON is better than what it replaced: market cap and
+        traded value arrive as exact KRW rather than rounded 억원, security type
+        separates stocks from ETFs and ETNs without a second source, and each
+        row carries its own trading-halt status.
+        """
         rows, page = [], 1
-        while page <= 80:
-            r = self.s.get(NAVER_LIST, params={"sosok": sosok, "page": str(page)},
-                           timeout=40)
-            table = BeautifulSoup(r.text, "lxml").find("table", class_="type_2")
-            if table is None:
+        while page <= 60:
+            r = self.s.get(NAVER_MKT.format(board=board),
+                           params={"page": page, "pageSize": 100}, timeout=30)
+            r.raise_for_status()
+            d = r.json() or {}
+            batch = d.get("stocks") or []
+            if not batch:
                 break
-            heads = [th.get_text(strip=True) for th in table.find_all("th")]
-            found = 0
-            for tr in table.find_all("tr"):
-                a = tr.find("a", href=re.compile(r"code=[0-9A-Z]{6}"))
-                if a is None:
-                    continue
-                tds = [td.get_text(strip=True) for td in tr.find_all("td")]
-                if len(tds) != len(heads):
-                    continue
-                rec = dict(zip(heads, tds))
-                rec["ticker"] = re.search(r"code=([0-9A-Z]{6})", a["href"]).group(1)
-                rec["board"] = board
-                rows.append(rec)
-                found += 1
-            if not found:
+            for x in batch:
+                halt = (x.get("tradeStopType") or {}).get("name", "")
+                rows.append({
+                    "ticker": x.get("itemCode", ""),
+                    "board": board,
+                    "name": (x.get("stockName") or "").strip(),
+                    "kind": x.get("stockEndType", ""),
+                    "halted": halt not in ("", "TRADING"),
+                    "close_krw": _fin_num(x.get("closePriceRaw")),
+                    "market_cap_local": _fin_num(x.get("marketValueRaw")),
+                    "volume": _fin_num(x.get("accumulatedTradingVolumeRaw")),
+                    "value_krw": _fin_num(x.get("accumulatedTradingValueRaw")),
+                })
+            if len(rows) >= int(d.get("totalCount") or 0):
                 break
             page += 1
             if page % 5 == 0:
-                # The page loop is the slowest stretch of a run; serve.py turns
-                # this into the progress line behind the Refresh button.
+                # The slowest stretch of a run; serve.py turns this into the
+                # progress line behind the Refresh button.
                 log.info("%s: page %d, %d rows so far", board, page, len(rows))
             time.sleep(self.cfg.request_delay)
 
-        log.info("%s: %d listings over %d pages", board, len(rows), page - 1)
+        log.info("%s: %d securities over %d pages", board, len(rows), page)
         return pd.DataFrame(rows)
 
     def _snapshot(self) -> pd.DataFrame:
@@ -210,43 +364,18 @@ class NaverKindProvider:
         if not frames:
             self._snap = pd.DataFrame()
             return self._snap
-        df = pd.concat(frames, ignore_index=True)
+        out = pd.concat(frames, ignore_index=True)
 
-        out = pd.DataFrame({"ticker": df["ticker"], "board": df["board"]})
-        out["name"] = df["종목명"].astype(str).str.strip()
-        out["close_krw"] = df["현재가"].map(_cell)
-        out["volume"] = df["거래량"].map(_cell)
-        # Naver reports 시가총액 in 억원.
-        out["market_cap_local"] = df["시가총액"].map(_cell) * 1e8
-        out["trailing_pe"] = df["PER"].map(_cell)
-        out["price_to_book"] = df["PBR"].map(_cell)
-        out["naver_roe_pct"] = df["ROE"].map(_cell)
-        dps = df["보통주배당금"].map(_cell)
+        # The board listing is every SECURITY, so KOSPI arrives as ~2,500 lines:
+        # ~945 companies plus ~1,530 ETFs and ETNs. The API labels them, so no
+        # second source is needed to tell them apart. Preferred lines stay in
+        # deliberately, so invariant 1 is visibly doing work rather than moot.
+        before = len(out)
+        out = out[out["kind"] == "stock"].copy()
+        log.info("universe: %d stocks kept, %d ETF/ETN dropped",
+                 len(out), before - len(out))
 
-        # Traded value is not published; reconstruct it. Flagged in the docstring
-        # because it is a proxy, not KRX's 거래대금.
-        out["value_krw"] = out["volume"] * out["close_krw"]
         out["shares_out"] = out["market_cap_local"] / out["close_krw"]
-        out["div_yield"] = dps / out["close_krw"] * 100.0
-
-        # EPS = P/PER and BPS = P/PBR are identities, so korea_filters' ROE
-        # (EPS/BPS) stays consistent with the PER and PBR being screened on.
-        out["trailing_eps"] = out["close_krw"] / out["trailing_pe"]
-        out["book_value_ps"] = out["close_krw"] / out["price_to_book"]
-
-        # Naver's board listing is every SECURITY on the board, so KOSPI comes
-        # back ~2,500 lines: roughly 950 companies plus ~1,600 ETFs and ETNs.
-        # Those carry no 업종 and would be dropped later by the industry gate,
-        # but only after inflating every funnel count above it. Restrict to
-        # lines whose common-stock code is a KIND-listed corporation. That
-        # keeps preferred lines in the universe - deliberately, so invariant 1
-        # is visibly doing work rather than silently moot.
-        corps = set(self._kind_industry()["ticker"])
-        if corps:
-            keep = out["ticker"].map(K.common_line_of).isin(corps)
-            log.info("universe: %d corporate lines kept, %d non-corporate "
-                     "(ETF/ETN/fund) dropped", int(keep.sum()), int((~keep).sum()))
-            out = out[keep].copy()
 
         self._snap = out
         return out
@@ -289,7 +418,7 @@ class NaverKindProvider:
         snap = self._snapshot()
         if snap.empty:
             return pd.DataFrame()
-        return snap[["ticker", "board", "name"]].copy()
+        return snap[["ticker", "board", "name", "halted"]].copy()
 
     def market_cap_snapshot(self, date: str) -> pd.DataFrame:
         snap = self._snapshot()
@@ -302,9 +431,11 @@ class NaverKindProvider:
         snap = self._snapshot()
         if snap.empty:
             return pd.DataFrame()
-        cols = ["ticker", "trailing_pe", "price_to_book", "trailing_eps",
-                "book_value_ps", "div_yield", "naver_roe_pct"]
-        return snap[cols].copy()
+        # Per-share fundamentals are no longer cross-sectional: the market-value
+        # API carries prices and sizes but no PER/PBR/EPS/BPS. Those now arrive
+        # per ticker from fetch_financials, AFTER the size gate, which keeps
+        # invariant 7 intact - the gate still runs on cheap cross-sectional data.
+        return pd.DataFrame(columns=["ticker"])
 
     def liquidity(self, dates: list[str]) -> pd.DataFrame:
         """Naver's cross-section is a live snapshot with no history, so a

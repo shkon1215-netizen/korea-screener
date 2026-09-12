@@ -59,6 +59,8 @@ def parse_args() -> argparse.Namespace:
                    help="cost of equity %% for the fair-PBR test")
     p.add_argument("--abs-min-div", type=float, default=2.0,
                    help="absolute screen: dividend yield %% floor; 0 disables")
+    p.add_argument("--no-financials", action="store_true",
+                   help="skip the 3-year revenue/EBITDA/net-profit history")
     p.add_argument("--keep-admin-issue", action="store_true",
                    help="do not drop 관리종목")
     p.add_argument("--dashboard", default="kr_dashboard.html",
@@ -123,6 +125,9 @@ def main() -> int:
         return 1
     roster, kstats = KF.apply_korea_filters(roster, cfg)
 
+    roster, hstats = KF.apply_halt_filter(roster)
+    kstats.update(hstats)
+
     if cfg.exclude_admin_issue:
         from providers_naver_kr import fetch_admin_issue_names
         roster, astats = KF.apply_admin_issue_filter(roster, fetch_admin_issue_names())
@@ -160,6 +165,29 @@ def main() -> int:
     log.info("fetching industry + EV/EBITDA for %d names...", len(pre))
     enr = prov.enrich(pre["ticker"].tolist())
     pre = pre.merge(enr, on="ticker", how="left")
+
+    # Three-year history. Also per-ticker, so it belongs here with the other
+    # slow work - after the size gate, on survivors only (invariant 7).
+    if not a.no_financials:
+        from providers_naver_kr import fetch_financials
+        log.info("fetching 3y financials for %d names...", len(pre))
+        fin = fetch_financials(pre["ticker"].tolist(), cache=prov.cache,
+                               delay=cfg.request_delay, workers=cfg.max_workers)
+        if not fin.empty:
+            pre = pre.merge(fin, on="ticker", how="left")
+
+        # PER and PBR against TODAY's price, not the fiscal year end Naver
+        # struck its own at. EPS and BPS are the reported per-share figures, so
+        # korea_filters' ROE (EPS/BPS) stays consistent with the multiples being
+        # screened - the property CLAUDE.md wants from ROE.
+        if "trailing_eps" in pre.columns:
+            close = pd.to_numeric(pre["close_krw"], errors="coerce")
+            eps = pd.to_numeric(pre["trailing_eps"], errors="coerce")
+            bps = pd.to_numeric(pre["book_value_ps"], errors="coerce")
+            dps = pd.to_numeric(pre.get("dps"), errors="coerce")
+            pre["trailing_pe"] = (close / eps).where(eps > 0)
+            pre["price_to_book"] = (close / bps).where(bps > 0)
+            pre["div_yield"] = (dps / close * 100.0).where(close > 0)
 
     # 6. screen
     res, stats = run_screen(pre, krw_usd, cfg)

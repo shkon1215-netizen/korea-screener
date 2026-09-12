@@ -56,6 +56,25 @@ def apply_korea_filters(df: pd.DataFrame, cfg: K.ScreenConfig) -> tuple[pd.DataF
     return df.copy(), stats
 
 
+def apply_halt_filter(df: pd.DataFrame) -> tuple[pd.DataFrame, dict]:
+    """Drop 거래정지 (suspended) lines.
+
+    Known gap #3 was open for as long as no free source published halt status.
+    Naver's market-value API carries `tradeStopType` per row, so it closes for
+    free - and unlike the 관리종목 list it matches on ticker, not company name.
+    A suspended line has a stale last price, which would otherwise be screened
+    as if it were live and could look arbitrarily cheap.
+    """
+    if "halted" not in df.columns:
+        return df, {}
+    df = df.copy()
+    hit = df["halted"].fillna(False).astype(bool)
+    n = int(hit.sum())
+    if n:
+        log.info("거래정지 removed: %s", ", ".join(df.loc[hit, "name"].head(10)))
+    return df[~hit].copy(), {"dropped_trading_halt": n}
+
+
 def apply_admin_issue_filter(df: pd.DataFrame, admin_names: set) -> tuple[pd.DataFrame, dict]:
     """Drop 관리종목 by name. Runs on the roster, before the size gate, so the
     funnel shows it and so it still protects when --min-mcap is lowered."""
@@ -214,6 +233,11 @@ def korea_output_columns(cfg: K.ScreenConfig) -> list[str]:
     for m in cfg.metrics:
         cols += [m, f"{m}_peer_median", f"{m}_discount",
                  f"{m}_peer_n", f"{m}_pct_rank"]
+    # Three-year history: yearly figures in 억원, oldest first, plus the
+    # compound rate across the span they cover.
+    cols += ["fin_years", "fin_n"]
+    for m in ("rev", "op", "ebitda", "np"):
+        cols += [f"{m}_y1", f"{m}_y2", f"{m}_y3", f"{m}_cagr"]
     cols += ["screen", "passes_any", "abs_passes", "abs_pbr_ok", "abs_ev_ok",
              "abs_pbr_vs_roe_ok", "abs_div_ok", "abs_roe_ok", "abs_fair_pbr",
              "abs_via_carveout",

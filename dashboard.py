@@ -40,6 +40,8 @@ TABLE_COLS = [
     ("mcap_musd", "Cap $m", ""), ("trailing_pe", "PER", ""), ("price_to_book", "PBR", ""),
     ("ev_to_ebitda", "EV/EBITDA", ""), ("roe_pct", "ROE %", ""),
     ("div_yield", "Yield %", ""), ("avg_discount", "Discount", ""),
+    ("rev_cagr", "Revenue 3y", ""), ("ebitda_cagr", "EBITDA 3y", ""),
+    ("np_cagr", "Net profit 3y", ""),
     ("screen", "Screen", "l"), ("metrics_passing", "Cheap on", "l"),
 ]
 
@@ -85,6 +87,16 @@ def _records(df: pd.DataFrame) -> list[dict]:
             "disc_pb": _f(r.get("price_to_book_discount"), 4),
             "disc_ev": _f(r.get("ev_to_ebitda_discount"), 4),
             "fin": bool(str(r.get("sector", "") or "").lower().find("financial") >= 0),
+            # Three-year history, oldest first, in 억원. The yearly values
+            # travel with the rate so a name whose CAGR is undefined (negative
+            # base) still shows what actually happened.
+            "fin_years": str(r.get("fin_years", "") or ""),
+            "rev": [_f(r.get(f"rev_y{i}"), 0) for i in (1, 2, 3)],
+            "ebitda": [_f(r.get(f"ebitda_y{i}"), 0) for i in (1, 2, 3)],
+            "np3": [_f(r.get(f"np_y{i}"), 0) for i in (1, 2, 3)],
+            "rev_cagr": _f(r.get("rev_cagr"), 4),
+            "ebitda_cagr": _f(r.get("ebitda_cagr"), 4),
+            "np_cagr": _f(r.get("np_cagr"), 4),
             "roe_tier": str(r.get("roe_tier", "")),
             "passes": bool(r.get("passes", False)),
             "screen": str(r.get("screen", "") or ""),
@@ -469,6 +481,15 @@ tbody tr.miss{opacity:.55}
 .dbar u{position:relative;text-decoration:none;padding-right:2px}
 .dbar.neg u{color:var(--ink-3)}
 .na{color:var(--ink-3)}
+.grow{display:inline-flex;align-items:flex-end;gap:7px;justify-content:flex-end}
+.spark{display:inline-flex;align-items:flex-end;gap:2px;height:17px}
+.gb{display:block;width:5px;background:var(--accent);border-radius:1px;
+  align-self:flex-end}
+.gb.neg{background:var(--crit)}
+.gb.gap{height:2px;background:var(--grid)}
+.grow u{text-decoration:none;min-width:42px;text-align:right;display:inline-block}
+.grow u.up{color:var(--ink)}
+.grow u.dn{color:var(--crit)}
 .notes{display:flex;flex-direction:column;gap:12px;border-top:1px solid var(--rule);
   padding-top:20px}
 .notes h3{font-size:11px;font-weight:600;letter-spacing:.12em;text-transform:uppercase;
@@ -916,6 +937,28 @@ function discColor(d) {
 const esc = (s) => String(s).replace(/[&<>"]/g, c =>
   ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
 
+/* Three years as three bars plus the compound rate. Bars are scaled within the
+   row's own range, so they show shape, not magnitude across rows - comparing
+   revenue bars between two companies would be meaningless. A negative year is
+   drawn downward from the baseline and coloured as a loss, and the yearly
+   figures are in the tooltip so nothing is only a picture. */
+function growthCell(rate, series, years) {
+  const vals = (series || []).filter(v => v !== null && v !== undefined);
+  if (!vals.length) return '<span class="na">—</span>';
+  const hi = Math.max(...vals.map(Math.abs), 1);
+  const yrs = (years || "").split(",");
+  const bars = (series || []).map((v, i) => {
+    if (v === null || v === undefined) return '<i class="gb gap"></i>';
+    const h = Math.max(2, Math.round(Math.abs(v) / hi * 15));
+    const lab = (yrs[i] || "") + ": " + v.toLocaleString() + "억";
+    return `<i class="gb ${v < 0 ? "neg" : ""}" style="height:${h}px" title="${lab}"></i>`;
+  }).join("");
+  const txt = rate === null || rate === undefined
+    ? '<u class="na" title="no rate: the starting year was zero or negative">n/a</u>'
+    : `<u class="${rate < 0 ? "dn" : "up"}">${rate >= 0 ? "+" : ""}${(rate * 100).toFixed(0)}%</u>`;
+  return `<span class="grow"><span class="spark">${bars}</span>${txt}</span>`;
+}
+
 function cell(r, k) {
   const v = r[k];
   if (k === "ticker") return `<span style="color:var(--ink-3)">${esc(v)}</span>`;
@@ -930,6 +973,10 @@ function cell(r, k) {
     const lab = s === "none" ? "—" : s;
     const star = r.ev.carved ? ' <span class="tag">pbr+roe</span>' : "";
     return `<span class="sbadge ${s}">${lab}</span>${star}`;
+  }
+  if (k === "rev_cagr" || k === "ebitda_cagr" || k === "np_cagr") {
+    const series = {rev_cagr: r.rev, ebitda_cagr: r.ebitda, np_cagr: r.np3}[k];
+    return growthCell(v, series, r.fin_years);
   }
   if (k === "metrics_passing") return v ? esc(v) : '<span class="na">—</span>';
   if (k === "roe_pct") {
