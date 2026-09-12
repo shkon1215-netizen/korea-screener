@@ -224,6 +224,17 @@ rate per metric.
   describe the same company: yfinance's operating income matches Naver's
   영업이익 exactly (삼성전자 2025, 436,011억 in both). Banks have no EBITDA in
   either, consistent with invariant 6.
+- **Two growth measures, one control.** The dashboard's "Growth shown as"
+  selector switches all three columns between latest year-on-year and the 3y
+  compound rate; the sparklines and the tooltip (every year, every YoY step,
+  the CAGR) are the same either way. They answer different questions - 세방전지
+  runs +13% CAGR on revenue but only +4% in the latest year, which is
+  deceleration the compound rate hides.
+- **YoY stays defined where CAGR does not.** A period-over-period change needs
+  no root, so dividing by |base| is well defined for a negative base and gives
+  the right sign for the direction of travel. A loss narrowing from -100 to -50
+  therefore reads +50%: an improvement, not a profit. The red bars and the raw
+  figures in the tooltip are what stop that being misread.
 - **CAGR is undefined when the starting year is zero or negative**, and is
   reported as missing rather than as a number with a meaningless sign. 55 of
   240 KOSPI names hit this. The yearly figures always ship alongside the rate,

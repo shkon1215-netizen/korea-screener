@@ -573,6 +573,13 @@ _TEMPLATE = """
       <label for="brd">Board</label>
       <select id="brd"><option value="">All</option></select>
     </div>
+    <div class="ctl">
+      <label for="gmode">Growth shown as</label>
+      <select id="gmode">
+        <option value="yoy">Year on year</option>
+        <option value="cagr">3-year CAGR</option>
+      </select>
+    </div>
     <label class="toggle"><input type="checkbox" id="onlypass" checked> Passing only</label>
     <label class="toggle"><input type="checkbox" id="nohold"> Hide holdcos</label>
     <span class="count" id="count"></span>
@@ -812,6 +819,17 @@ function paintAll() {
 const NUM = new Set(["mcap_musd","trailing_pe","price_to_book","ev_to_ebitda",
                      "roe_pct","div_yield","avg_discount"]);
 let sortKey = "avg_discount", sortDir = -1;
+let growthMode = "yoy";
+
+/* Latest year-on-year, precomputed so it can be sorted on like any column. */
+function computeGrowth() {
+  D.rows.forEach(r => {
+    Object.entries(GROWTH).forEach(([key, field]) => {
+      const steps = yoySteps(r[field] || []);
+      r[key.replace("_cagr", "_yoy")] = steps.length ? steps[steps.length - 1] : null;
+    });
+  });
+}
 
 $("thead").innerHTML = D.cols.map(c =>
   `<th class="${c.a}" data-k="${c.k}">${c.h}<span class="ar">▾</span></th>`).join("");
@@ -937,26 +955,62 @@ function discColor(d) {
 const esc = (s) => String(s).replace(/[&<>"]/g, c =>
   ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
 
-/* Three years as three bars plus the compound rate. Bars are scaled within the
-   row's own range, so they show shape, not magnitude across rows - comparing
-   revenue bars between two companies would be meaningless. A negative year is
-   drawn downward from the baseline and coloured as a loss, and the yearly
-   figures are in the tooltip so nothing is only a picture. */
-function growthCell(rate, series, years) {
-  const vals = (series || []).filter(v => v !== null && v !== undefined);
+/* Growth metrics and where each one's inputs live. */
+const GROWTH = {rev_cagr: "rev", ebitda_cagr: "ebitda", np_cagr: "np3"};
+const GROWTH_LABEL = {rev_cagr: "Revenue", ebitda_cagr: "EBITDA", np_cagr: "Net profit"};
+
+/* Simple period-over-period change. Unlike CAGR this stays defined when the
+   base is negative, because it needs no root: dividing by |base| gives the
+   right SIGN for the direction of travel, so a loss narrowing from -100 to
+   -50 reads +50%. That is an improvement, not a profit - the red bars and the
+   tooltip's raw figures are what stop it being read as growth. */
+function pctChange(from, to) {
+  if (from === null || from === undefined || to === null || to === undefined) return null;
+  if (from === 0) return null;
+  return (to - from) / Math.abs(from);
+}
+
+/* Year-on-year for each step in the series, oldest first. */
+function yoySteps(series) {
+  const out = [];
+  for (let i = 1; i < (series || []).length; i++) out.push(pctChange(series[i - 1], series[i]));
+  return out;
+}
+
+const fmtPct = (v) => v === null || v === undefined ? "n/a"
+  : (v >= 0 ? "+" : "") + (v * 100).toFixed(0) + "%";
+
+/* Three years as three bars plus a rate. Bars are scaled within the row's own
+   range, so they show shape, not magnitude across rows - comparing revenue
+   bars between two companies would be meaningless. A negative year is drawn as
+   a loss, and every underlying figure is in the tooltip so nothing is only a
+   picture. */
+function growthCell(r, key) {
+  const series = r[GROWTH[key]] || [];
+  const vals = series.filter(v => v !== null && v !== undefined);
   if (!vals.length) return '<span class="na">—</span>';
   const hi = Math.max(...vals.map(Math.abs), 1);
-  const yrs = (years || "").split(",");
-  const bars = (series || []).map((v, i) => {
+  const yrs = (r.fin_years || "").split(",");
+  const steps = yoySteps(series);
+
+  const bars = series.map((v, i) => {
     if (v === null || v === undefined) return '<i class="gb gap"></i>';
     const h = Math.max(2, Math.round(Math.abs(v) / hi * 15));
-    const lab = (yrs[i] || "") + ": " + v.toLocaleString() + "억";
-    return `<i class="gb ${v < 0 ? "neg" : ""}" style="height:${h}px" title="${lab}"></i>`;
+    return `<i class="gb ${v < 0 ? "neg" : ""}" style="height:${h}px"></i>`;
   }).join("");
+
+  // One tooltip for the whole cell: every year, every step, and the compound
+  // rate - so whichever mode is on screen, the rest is a hover away.
+  const tip = GROWTH_LABEL[key] + " (억원)\\n"
+    + series.map((v, i) => `${yrs[i] || "?"}: ${v === null || v === undefined ? "—" : v.toLocaleString()}`
+        + (i > 0 ? `  (${fmtPct(steps[i - 1])} YoY)` : "")).join("\\n")
+    + `\\n3y CAGR: ${r[key] === null || r[key] === undefined ? "n/a — base was zero or negative" : fmtPct(r[key])}`;
+
+  const rate = growthMode === "yoy" ? r[key.replace("_cagr", "_yoy")] : r[key];
   const txt = rate === null || rate === undefined
-    ? '<u class="na" title="no rate: the starting year was zero or negative">n/a</u>'
-    : `<u class="${rate < 0 ? "dn" : "up"}">${rate >= 0 ? "+" : ""}${(rate * 100).toFixed(0)}%</u>`;
-  return `<span class="grow"><span class="spark">${bars}</span>${txt}</span>`;
+    ? '<u class="na">n/a</u>'
+    : `<u class="${rate < 0 ? "dn" : "up"}">${fmtPct(rate)}</u>`;
+  return `<span class="grow" title="${esc(tip)}"><span class="spark">${bars}</span>${txt}</span>`;
 }
 
 function cell(r, k) {
@@ -974,10 +1028,7 @@ function cell(r, k) {
     const star = r.ev.carved ? ' <span class="tag">pbr+roe</span>' : "";
     return `<span class="sbadge ${s}">${lab}</span>${star}`;
   }
-  if (k === "rev_cagr" || k === "ebitda_cagr" || k === "np_cagr") {
-    const series = {rev_cagr: r.rev, ebitda_cagr: r.ebitda, np_cagr: r.np3}[k];
-    return growthCell(v, series, r.fin_years);
-  }
+  if (k in GROWTH) return growthCell(r, k);
   if (k === "metrics_passing") return v ? esc(v) : '<span class="na">—</span>';
   if (k === "roe_pct") {
     if (v === null) return '<span class="na">—</span>';
@@ -1001,10 +1052,12 @@ function cell(r, k) {
 /* Re-evaluated on every threshold change and cached on the row, so the tiles,
    the tests panel, the funnel tail and the table all read one verdict. */
 function evaluateAll() {
+  computeGrowth();
   D.rows.forEach(r => { r.ev = evaluate(r); r.cap = inCap(r); });
 }
 
 function render() {
+  growthMode = $("gmode").value;
   const q = $("q").value.trim().toLowerCase();
   const brd = $("brd").value;
   const onlyPass = $("onlypass").checked, noHold = $("nohold").checked;
@@ -1021,8 +1074,10 @@ function render() {
     return true;
   });
 
+  const sk = (sortKey in GROWTH && growthMode === "yoy")
+    ? sortKey.replace("_cagr", "_yoy") : sortKey;
   rows.sort((a, b) => {
-    const x = a[sortKey], y = b[sortKey];
+    const x = a[sk], y = b[sk];
     if (x === null && y === null) return 0;
     if (x === null) return 1;
     if (y === null) return -1;
@@ -1030,6 +1085,11 @@ function render() {
   });
 
   $("thead").querySelectorAll("th").forEach(th => {
+    const k = th.dataset.k;
+    if (k in GROWTH) {
+      th.firstChild.textContent =
+        GROWTH_LABEL[k] + (growthMode === "yoy" ? " YoY" : " 3y");
+    }
     th.classList.toggle("on", th.dataset.k === sortKey);
     const ar = th.querySelector(".ar");
     if (ar) ar.textContent = sortDir < 0 ? "▾" : "▴";
@@ -1044,7 +1104,7 @@ function render() {
     + (inCapN < D.rows.length ? ` (${D.rows.length - inCapN} outside the cap range)` : "");
 }
 
-["q","brd","scr","onlypass","nohold"].forEach(id =>
+["q","brd","scr","gmode","onlypass","nohold"].forEach(id =>
   $(id).addEventListener("input", render));
 
 /* ---- live refresh ----------------------------------------------------
