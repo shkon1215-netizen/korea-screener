@@ -64,6 +64,16 @@ class ScreenConfig:
     # 관리종목. KIND publishes the list free, but by company NAME only.
     exclude_admin_issue: bool = True
 
+    # --- Historical-self screen ---
+    # Cheap against the company's OWN five filed years, not its peers or a
+    # fixed level. The benchmark is a median, for the same reason peer medians
+    # are (invariant 4): one freak year - 삼성전자 at 36.8x PER in 2023 - would
+    # drag a mean far enough to make an ordinary year look cheap.
+    hist_min_discount: float = 0.30
+    hist_min_metrics: int = 2       # of PER, PBR, EV/EBITDA; financials have no EV/EBITDA
+    hist_min_years: int = 3         # below this there is no history, only noise
+    hist_require_roe: bool = True   # same floor as the other two screens
+
     # --- Peer groups ---
     # Korea-only holds the country effect constant, so industry-alone peers
     # are legitimate here. The freed dimension goes to the listing board:

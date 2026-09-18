@@ -42,6 +42,7 @@ TABLE_COLS = [
     ("div_yield", "Yield %", ""), ("avg_discount", "Discount", ""),
     ("rev_cagr", "Revenue 3y", ""), ("ebitda_cagr", "EBITDA 3y", ""),
     ("np_cagr", "Net profit 3y", ""),
+    ("hist_avg_disc", "vs own 5y", ""),
     ("screen", "Screen", "l"), ("metrics_passing", "Cheap on", "l"),
 ]
 
@@ -97,6 +98,14 @@ def _records(df: pd.DataFrame) -> list[dict]:
             "rev_cagr": _f(r.get("rev_cagr"), 4),
             "ebitda_cagr": _f(r.get("ebitda_cagr"), 4),
             "np_cagr": _f(r.get("np_cagr"), 4),
+            # Own five-year history. The medians and today's values let the
+            # page re-threshold the screen; the yearly values feed the tooltip.
+            "hist_years": str(r.get("hist_years", "") or ""),
+            "evx_now": _f(r.get("evx_now")),
+            "h_med": {k: _f(r.get(f"hist_{k}_med")) for k in ("per", "pbr", "evx")},
+            "h_ser": {k: [_f(r.get(f"hist_{k}_y{i}")) for i in range(1, 6)]
+                      for k in ("per", "pbr", "evx")},
+            "hist_avg_disc": _f(r.get("hist_avg_disc"), 4),
             "roe_tier": str(r.get("roe_tier", "")),
             "passes": bool(r.get("passes", False)),
             "screen": str(r.get("screen", "") or ""),
@@ -209,6 +218,9 @@ def build_payload(csv_path: str, meta_path: str, boards: list | None = None) -> 
             "abs_max_ev": th.get("abs_max_ev_ebitda", 8.0),
             "coe": th.get("abs_cost_of_equity_pct", 10.0),
             "abs_min_div": th.get("abs_min_div_yield", 2.0),
+            "hist_disc": th.get("hist_min_discount", 0.30),
+            "hist_nmet": th.get("hist_min_metrics", 2),
+            "hist_years_min": th.get("hist_min_years", 3),
             "med_roe": None if pd.isna(med_roe) else round(float(med_roe), 1),
             "med_disc": None if pd.isna(med_disc) else round(float(med_disc), 4),
         },
@@ -553,6 +565,15 @@ _TEMPLATE = """
       <ul class="tests" id="tests"></ul>
       <div class="drops" id="absnote"></div>
     </section>
+
+    <section class="panel">
+      <div class="panel-h">
+        <h2>Cheap vs its own 5 years</h2>
+        <span class="hint">median of filed years</span>
+      </div>
+      <ul class="tests" id="htests"></ul>
+      <div class="drops" id="hnote"></div>
+    </section>
   </div>
 
   <section class="controls">
@@ -563,10 +584,12 @@ _TEMPLATE = """
     <div class="ctl">
       <label for="scr">Screen</label>
       <select id="scr">
-        <option value="">Either screen</option>
-        <option value="relative">Relative only</option>
-        <option value="absolute">Absolute only</option>
-        <option value="both">Both screens</option>
+        <option value="">Any screen</option>
+        <option value="relative">Cheap vs peers</option>
+        <option value="absolute">Cheap outright</option>
+        <option value="history">Cheap vs own 5y</option>
+        <option value="2">Two or more screens</option>
+        <option value="3">All three screens</option>
       </select>
     </div>
     <div class="ctl">
@@ -614,6 +637,10 @@ _TEMPLATE = """
         <input type="number" id="t_disc" step="5"></div>
       <div class="tg"><label for="t_nmet">…on at least N metrics</label>
         <input type="number" id="t_nmet" min="1" max="3" step="1"></div>
+      <div class="tg"><label for="t_hdisc">Below own 5y by at least %</label>
+        <input type="number" id="t_hdisc" min="0" step="5"></div>
+      <div class="tg"><label for="t_hnmet">…on at least N metrics</label>
+        <input type="number" id="t_hnmet" min="1" max="3" step="1"></div>
     </div>
     <div class="thrtoggles">
       <label class="toggle"><input type="checkbox" id="t_fair"> Require PBR below fair value</label>
@@ -634,12 +661,22 @@ _TEMPLATE = """
 
   <section class="notes">
     <h3>Read this before acting on it</h3>
-    <p><b>Two screens, deliberately independent.</b> The <b>relative</b> screen asks
-    whether a name is cheap against its own industry peers. The <b>absolute</b> screen
-    ignores the neighbours and asks whether it is cheap outright. Korea needs both:
-    a peer group where everything is expensive still produces "cheap" names, and one
-    where everything is cheap hides them. A row tagged <b>both</b> cleared each test
-    on its own terms.</p>
+    <p><b>Cheap vs its own five years</b> compares today's PER, PBR and EV/EBITDA
+    with the median of the company's last five filed years. It catches what the
+    other two miss - a company that always traded at a premium and has just
+    de-rated. Loss years drop out of the benchmark rather than dragging it, and
+    fewer than three usable years means no benchmark at all. <b>One caution:</b>
+    these are trailing multiples, so when earnings are surging the latest filing
+    lags the price and a stock reads <i>expensive</i> against its history until
+    the next filing catches up. A one-off gain does the opposite.</p>
+    <p><b>Three screens, deliberately independent.</b> Cheap <b>vs peers</b> asks
+    whether a name trades below its industry median. Cheap <b>outright</b> ignores
+    the neighbours and asks whether it is cheap on fixed levels. Cheap <b>vs its
+    own 5 years</b> asks whether it is cheap against itself. Korea needs all
+    three: a peer group where everything is expensive still produces "cheap"
+    names, one where everything is cheap hides them, and neither notices a
+    premium company that has quietly de-rated. None gates another; the Screen
+    column lists every one a row cleared.</p>
     <p><b>Financials qualify on a weaker bar.</b> Enterprise value is meaningless for
     a bank, so EV/EBITDA is suppressed for them — which means a strict
     both-metrics rule would exclude every bank, insurer, broker and holdco no matter
@@ -715,14 +752,14 @@ function paintTiles() {
 const live = D.rows.filter(r => r.cap);
 const anyp = live.filter(r => r.ev.any);
 const rel = live.filter(r => r.ev.rel), absl = live.filter(r => r.ev.abs);
-const both = live.filter(r => r.ev.screen === "both");
+const hist = live.filter(r => r.ev.hist);
 const mRoe = median(anyp.map(r => r.roe_pct));
 const mDisc = median(rel.map(r => r.avg_discount));
 const capLabel = T.mcap_hi ? `$${T.mcap_lo ?? 0}m–$${T.mcap_hi}m`
                            : `$${T.mcap_lo ?? 0}m+`;
 const tiles = [
-  {k:"Passing either", v:anyp.length,
-   n:`${rel.length} relative · ${absl.length} absolute · ${both.length} both`},
+  {k:"Passing any screen", v:anyp.length,
+   n:`${rel.length} vs peers · ${absl.length} outright · ${hist.length} vs own 5y`},
   {k:"Median discount", v:mDisc===null?"—":(mDisc*100).toFixed(0)+"%",
    n:`relative: ${T.disc===null?"any":T.disc+"%"}+ below peers on ${T.nmet}+ metrics`},
   {k:"Median ROE", v:mRoe===null?"—":mRoe.toFixed(1)+"%",
@@ -799,6 +836,26 @@ function paintTests() {
     : "";
 }
 
+/* ---- own-history tests -------------------------------------------------- */
+function paintHistTests() {
+  const live = D.rows.filter(r => r.cap);
+  const lab = {per: "PER", pbr: "PBR", evx: "EV/EBITDA"};
+  const lines = ["per", "pbr", "evx"].map(k => {
+    const withB = live.filter(r => r.ev.hd[k] !== null).length;
+    const pass = live.filter(r => r.ev.hd[k] !== null && r.ev.hd[k] >= T.hdisc / 100).length;
+    return `<li><span><span class="tick">✓</span>${lab[k]} ${T.hdisc}%+ below its median`
+      + ` <span style="color:var(--ink-3)">(${withB} have history)</span></span><b>${pass}</b></li>`;
+  });
+  const n = live.filter(r => r.ev.hist).length;
+  const fresh = live.filter(r => r.ev.hist && !r.ev.rel && !r.ev.abs).length;
+  $("htests").innerHTML = lines.join("")
+    + `<li class="total"><span>${T.hnmet} or more of them`
+    + (T.roe !== null ? `, ROE ${T.roe}%+` : "") + `</span><b>${n}</b></li>`;
+  $("hnote").innerHTML = n
+    ? `<span class="drop"><b>${fresh}</b> of these clear neither of the other two screens</span>`
+    : "";
+}
+
 /* Board options are rebuilt from the new data, but a selection the viewer made
    is kept when that board still exists in the refreshed run. */
 function paintBoards() {
@@ -812,7 +869,8 @@ function paintBoards() {
 
 function paintAll() {
   evaluateAll();
-  paintHeader(); paintTiles(); paintFunnel(); paintTests(); paintBoards(); render();
+  paintHeader(); paintTiles(); paintFunnel(); paintTests(); paintHistTests();
+  paintBoards(); render();
 }
 
 /* ---- table ----------------------------------------------------------- */
@@ -846,7 +904,7 @@ $("thead").querySelectorAll("th").forEach(th => th.addEventListener("click", () 
    when the run built its cohorts) and any market cap BELOW the run's floor,
    because those rows were gated out before scoring and are simply absent. */
 const THR_KEYS = ["mcap_lo","mcap_hi","pbr","ev","per","roe","div","coe",
-                  "disc","nmet","fair","carve"];
+                  "disc","nmet","hdisc","hnmet","fair","carve"];
 const STORE = "kr-thresholds-" + (M.board || "x");
 let T = {};
 
@@ -856,6 +914,7 @@ function defaults() {
     pbr: M.abs_max_pbr, ev: M.abs_max_ev, per: null,
     roe: M.min_roe, div: M.abs_min_div, coe: M.coe,
     disc: Math.round(M.discount * 100), nmet: M.min_metrics,
+    hdisc: Math.round((M.hist_disc ?? 0.30) * 100), hnmet: M.hist_nmet ?? 2,
     fair: true, carve: (M.n_carveout || 0) > 0 || true,
   };
 }
@@ -869,6 +928,7 @@ function readControls() {
     per: numOrNull($("t_per")), roe: numOrNull($("t_roe")),
     div: numOrNull($("t_div")), coe: numOrNull($("t_coe")) || 10,
     disc: numOrNull($("t_disc")), nmet: numOrNull($("t_nmet")) || 1,
+    hdisc: numOrNull($("t_hdisc")) ?? 30, hnmet: numOrNull($("t_hnmet")) || 1,
     fair: $("t_fair").checked, carve: $("t_carve").checked,
   };
   ["t_per","t_mcap_hi"].forEach(id => $(id).classList.toggle("off", !numOrNull($(id))));
@@ -891,6 +951,8 @@ function writeControls(v) {
   $("t_coe").value = v.coe ?? 10;
   $("t_disc").value = v.disc ?? "";
   $("t_nmet").value = v.nmet ?? 2;
+  $("t_hdisc").value = v.hdisc ?? 30;
+  $("t_hnmet").value = v.hnmet ?? 2;
   $("t_fair").checked = !!v.fair;
   $("t_carve").checked = !!v.carve;
 }
@@ -916,10 +978,30 @@ function evaluate(r) {
   if (T.carve && r.fin && pbrOk && !evOk) { core = true; carved = true; }
   const abs = core && perOk && roeOk && divOk && fairOk;
 
-  return {rel, abs, carved,
-          screen: rel && abs ? "both" : rel ? "relative" : abs ? "absolute" : "",
-          any: rel || abs,
+  // Own five-year history. Mirrors korea_filters.apply_history_screen: the
+  // benchmark medians were built in Python (loss years and out-of-bounds
+  // values already excluded), so only the threshold and count are live here.
+  const hd = histDiscounts(r);
+  const hPass = Object.values(hd).filter(d => d !== null && d >= T.hdisc / 100).length;
+  const hist = hPass >= T.hnmet && roeOk;
+
+  const on = [rel && "relative", abs && "absolute", hist && "history"].filter(Boolean);
+  return {rel, abs, hist, carved, hd, hPass,
+          screen: on.join(" + "), n: on.length, any: on.length > 0,
           tests: {pbr: pbrOk, ev: evOk, fair: fairOk, div: divOk, roe: roeOk}};
+}
+
+/* Today's value against the five-year median, per metric. Null where there is
+   no benchmark (fewer than the minimum usable years) or no valid value today -
+   a missing value is never a cheap one (invariant 2). */
+function histDiscounts(r) {
+  const cur = {per: r.trailing_pe, pbr: r.price_to_book, evx: r.evx_now};
+  const out = {};
+  ["per", "pbr", "evx"].forEach(k => {
+    const m = r.h_med ? r.h_med[k] : null, c = cur[k];
+    out[k] = (m && c !== null && c !== undefined && m > 0 && c > 0) ? (m - c) / m : null;
+  });
+  return out;
 }
 
 function inCap(r) {
@@ -1013,6 +1095,34 @@ function growthCell(r, key) {
   return `<span class="grow" title="${esc(tip)}"><span class="spark">${bars}</span>${txt}</span>`;
 }
 
+/* Average discount to the company's own five-year median, across every metric
+   that has one - including the ones that failed, as avg_discount does
+   (invariant 5). The tooltip carries each metric's history, median, today's
+   value and the discount, so a single number never stands in for three. */
+function histCell(r) {
+  const hd = r.ev.hd;
+  const vals = Object.values(hd).filter(v => v !== null);
+  if (!vals.length) return '<span class="na" title="fewer than '
+    + (M.hist_years_min || 3) + ' usable years of history">—</span>';
+  const avg = vals.reduce((a, b) => a + b, 0) / vals.length;
+  const yrs = (r.hist_years || "").split(",");
+  const lab = {per: "PER", pbr: "PBR", evx: "EV/EBITDA"};
+  const now = {per: r.trailing_pe, pbr: r.price_to_book, evx: r.evx_now};
+  const tip = ["per", "pbr", "evx"].map(k => {
+    const ser = (r.h_ser && r.h_ser[k] || []).map((v, i) =>
+      (yrs[i] || "?") + " " + (v === null ? "—" : v.toFixed(1))).join(", ");
+    const med = r.h_med && r.h_med[k];
+    if (med === null || med === undefined) return lab[k] + ": no usable history";
+    return `${lab[k]}: now ${now[k] === null || now[k] === undefined ? "—" : now[k].toFixed(2)}`
+      + ` vs median ${med.toFixed(2)} → ${hd[k] === null ? "n/a" : fmtPct(-hd[k]) + " vs history"}`
+      + `\\n   ${ser}`;
+  }).join("\\n");
+  const passTag = r.ev.hist ? ' <span class="tag">5y low</span>' : "";
+  return `<span class="dbar ${avg < 0 ? "neg" : ""}" title="${esc(tip)}">`
+    + `<i style="width:${Math.max(0, Math.min(100, avg * 100))}%;background:${discColor(avg)}"></i>`
+    + `<u>${(avg * 100).toFixed(0)}%</u></span>${passTag}`;
+}
+
 function cell(r, k) {
   const v = r[k];
   if (k === "ticker") return `<span style="color:var(--ink-3)">${esc(v)}</span>`;
@@ -1029,6 +1139,7 @@ function cell(r, k) {
     return `<span class="sbadge ${s}">${lab}</span>${star}`;
   }
   if (k in GROWTH) return growthCell(r, k);
+  if (k === "hist_avg_disc") return histCell(r);
   if (k === "metrics_passing") return v ? esc(v) : '<span class="na">—</span>';
   if (k === "roe_pct") {
     if (v === null) return '<span class="na">—</span>';
@@ -1066,7 +1177,8 @@ function render() {
   let rows = D.rows.filter(r => {
     if (!r.cap) return false;
     if (onlyPass && !r.ev.any) return false;
-    if (scr && r.ev.screen !== scr) return false;
+    if (scr === "2" || scr === "3") { if (r.ev.n < +scr) return false; }
+    else if (scr && !r.ev[{relative: "rel", absolute: "abs", history: "hist"}[scr]]) return false;
     if (noHold && r.holdco) return false;
     if (brd && r.board !== brd) return false;
     if (q && !(r.name.toLowerCase().includes(q) || r.ticker.includes(q)

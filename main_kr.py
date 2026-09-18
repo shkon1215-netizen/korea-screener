@@ -61,6 +61,12 @@ def parse_args() -> argparse.Namespace:
                    help="absolute screen: dividend yield %% floor; 0 disables")
     p.add_argument("--no-financials", action="store_true",
                    help="skip the 3-year revenue/EBITDA/net-profit history")
+    p.add_argument("--no-history", action="store_true",
+                   help="skip the own-5-year-history screen")
+    p.add_argument("--hist-discount", type=float, default=0.30,
+                   help="own-history screen: discount to 5y median, 0.30 = 30%%")
+    p.add_argument("--hist-min-metrics", type=int, default=2,
+                   help="own-history screen: metrics that must clear it (1-3)")
     p.add_argument("--keep-admin-issue", action="store_true",
                    help="do not drop 관리종목")
     p.add_argument("--dashboard", default="kr_dashboard.html",
@@ -92,6 +98,8 @@ def main() -> int:
         abs_cost_of_equity_pct=a.coe,
         abs_min_div_yield=a.abs_min_div,
         exclude_admin_issue=not a.keep_admin_issue,
+        hist_min_discount=a.hist_discount,
+        hist_min_metrics=a.hist_min_metrics,
         peer_keys=tuple(k.strip() for k in a.peer_keys.split(",") if k.strip()),
         exclude_preferred=not a.include_preferred,
         exclude_holdcos=a.exclude_holdcos,
@@ -176,6 +184,16 @@ def main() -> int:
         if not fin.empty:
             pre = pre.merge(fin, on="ticker", how="left")
 
+    # Five filed years of PER/PBR/EV-EBITDA for the own-history screen. Also
+    # per ticker, so it stays here after the size gate (invariant 7).
+    if not a.no_history:
+        from providers_naver_kr import fetch_valuation_history
+        log.info("fetching 5y valuation history for %d names...", len(pre))
+        vh = fetch_valuation_history(pre["ticker"].tolist(), cache=prov.cache,
+                                     delay=cfg.request_delay, workers=cfg.max_workers)
+        if not vh.empty:
+            pre = pre.merge(vh, on="ticker", how="left")
+
         # PER and PBR against TODAY's price, not the fiscal year end Naver
         # struck its own at. EPS and BPS are the reported per-share figures, so
         # korea_filters' ROE (EPS/BPS) stays consistent with the multiples being
@@ -204,6 +222,10 @@ def main() -> int:
 
     res, absstats = KF.apply_absolute_screen(res, cfg)
     stats = {**stats, **absstats}
+
+    if not a.no_history and "hist_pbr" in res.columns:
+        res, hstats = KF.apply_history_screen(res, cfg)
+        stats = {**stats, **hstats}
 
     funnel = {**kstats, **stats}
     print("\n--- funnel ---")
@@ -254,6 +276,9 @@ def main() -> int:
             "abs_require_pbr_vs_roe": cfg.abs_require_pbr_vs_roe,
             "abs_cost_of_equity_pct": cfg.abs_cost_of_equity_pct,
             "abs_min_div_yield": cfg.abs_min_div_yield,
+            "hist_min_discount": cfg.hist_min_discount,
+            "hist_min_metrics": cfg.hist_min_metrics,
+            "hist_min_years": cfg.hist_min_years,
         },
     }
     meta_path = os.path.splitext(a.out)[0] + "_meta.json"

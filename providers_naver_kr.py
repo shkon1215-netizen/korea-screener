@@ -260,6 +260,106 @@ def fetch_financials(tickers: list[str], cache=None, delay: float = 0.12,
     return pd.DataFrame(out)
 
 
+WR_BASE = "https://navercomp.wisereport.co.kr/v2/company"
+
+
+def fetch_valuation_history(tickers: list[str], cache=None, delay: float = 0.12,
+                            workers: int = 6) -> pd.DataFrame:
+    """Five filed years of PER, PBR and EV/EBITDA from WiseReport, plus the
+    latest-year pieces needed to build a CONSISTENT current EV/EBITDA.
+
+    WiseReport is the FnGuide data behind Naver's own company pages. Its EPS and
+    BPS match Naver's exactly (verified on 8 names including a bank and a
+    loss-maker), so today's PER/PBR - today's close over the latest EPS/BPS -
+    sit on the same per-share definitions as the history they are compared to.
+
+    EV/EBITDA is different, and the reason this function returns more than the
+    three ratios. yfinance's current EV/EBITDA does NOT compare cleanly with
+    WiseReport's history: only 18 of 30 names landed within +/-25%, and holdcos
+    diverged up to 5x (아모레퍼시픽홀딩스, 한화) because the two providers
+    build EV differently. At a 30% threshold that gap would manufacture signals.
+    So current EV/EBITDA is rebuilt from WiseReport's own figures - see
+    `current_ev_ebitda` in korea_filters.
+
+    One session token (`encparam`) serves every ticker, so this is one page
+    fetch per run plus one call per report tab per ticker. The 2026(E) column
+    is an analyst estimate and is dropped, same rule as fetch_financials.
+    """
+    from concurrent.futures import ThreadPoolExecutor, as_completed
+
+    sess = requests.Session()
+    sess.headers.update({"User-Agent": UA})
+    try:
+        page = sess.get(f"{WR_BASE}/c1040001.aspx", params={"cmp_cd": "005930"},
+                        timeout=30).text
+        enc = re.search(r"encparam:\s*'([^']+)'", page).group(1)
+    except Exception as e:
+        log.warning("valuation history unavailable - no WiseReport token (%s)", e)
+        return pd.DataFrame(columns=["ticker"])
+
+    def tab(code: str, rpt: str):
+        r = sess.get(f"{WR_BASE}/cF4002.aspx",
+                     params={"cmp_cd": code, "frq": "0", "rpt": rpt,
+                             "finGubun": "MAIN", "frqTyp": "0", "cn": "",
+                             "encparam": enc},
+                     headers={"Referer": f"{WR_BASE}/c1040001.aspx?cmp_cd={code}",
+                              "X-Requested-With": "XMLHttpRequest"}, timeout=30)
+        r.raise_for_status()
+        d = r.json() or {}
+        yrs = [str(y).split("<")[0] for y in d.get("YYMM", [])]
+        # Only filed years: the first six slots hold years, and an estimate is
+        # marked "(E)". Anything after is a YoY comparison column.
+        filed = [i for i, y in enumerate(yrs[:6]) if "(E)" not in y and "/" in y]
+        return [yrs[i][:4] for i in filed], filed, d.get("DATA", [])
+
+    def pick(rows, name, idx, prefix=False):
+        for x in rows:
+            nm = str(x.get("ACC_NM", ""))
+            if (nm.startswith(name) if prefix else nm == name):
+                return [_num(x.get(f"DATA{i + 1}")) for i in idx]
+        return [np.nan] * len(idx)
+
+    def one(code: str) -> dict:
+        if cache is not None:
+            hit = cache.get(f"vhist_{code}")
+            if hit:
+                return {**hit, "ticker": code}
+        rec = {"ticker": code}
+        try:
+            time.sleep(delay)
+            years, idx, v = tab(code, "5")
+            rec["hist_years"] = ",".join(years)
+            for src, key in (("PER", "per"), ("PBR", "pbr"), ("EV/EBITDA", "evx")):
+                rec[f"hist_{key}"] = pick(v, src, idx)
+            # Latest-year pieces for the consistent current EV/EBITDA.
+            rec["wr_equity"] = pick(v, "자본총계(지배)", idx, prefix=True)[-1] if idx else np.nan
+            _, idx1, v1 = tab(code, "1")
+            rec["wr_ebitda"] = (pick(v1, "EBITDA＜", idx1, prefix=True)[-1]
+                                if idx1 else np.nan)
+        except Exception as e:
+            log.debug("valuation history failed for %s: %s", code, e)
+        if cache is not None and "hist_years" in rec:
+            clean = lambda x: None if (isinstance(x, float) and not np.isfinite(x)) else x
+            cache.set(f"vhist_{code}", {k: ([clean(i) for i in v] if isinstance(v, list)
+                                            else clean(v))
+                                        for k, v in rec.items() if k != "ticker"})
+        return rec
+
+    out, failed = [], 0
+    with ThreadPoolExecutor(max_workers=workers) as ex:
+        futs = [ex.submit(one, t) for t in tickers]
+        for i, f in enumerate(as_completed(futs), 1):
+            rec = f.result()
+            failed += "hist_years" not in rec
+            out.append(rec)
+            if i % 50 == 0:
+                log.info("valuation history %d/%d", i, len(tickers))
+    if tickers and failed > len(tickers) * 0.3:
+        log.warning("valuation history missing for %d of %d names - check for "
+                    "rate limiting or a WiseReport change", failed, len(tickers))
+    return pd.DataFrame(out)
+
+
 def _fin_sector(industry: str) -> str:
     s = str(industry)
     return "Financial Services" if any(t in s for t in _FIN_TOKENS) else ""

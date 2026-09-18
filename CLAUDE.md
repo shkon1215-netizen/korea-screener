@@ -85,11 +85,13 @@ column-name mismatch produces silent all-NaN merges rather than an error.
    resolved is not a company we can call profitable. Default 5%, `--min-roe 0`
    disables.
 
-9. **Two independent screens.** The relative screen (peer median) and the
-   absolute screen (`apply_absolute_screen`) are scored separately and unioned
-   into `passes_any`; `screen` records which one a name cleared. Neither
-   gates the other. The absolute tests are PBR < 1, EV/EBITDA < 8,
-   PBR < ROE/CoE, dividend yield >= 2%, and the same ROE floor.
+9. **Three independent screens.** Relative (peer median), absolute
+   (`apply_absolute_screen`) and own-history (`apply_history_screen`) are scored
+   separately and unioned into `passes_any`; `screen` lists every one a name
+   cleared, joined with " + ". None gates another. The absolute tests are
+   PBR < 1, EV/EBITDA < 8, PBR < ROE/CoE, dividend yield >= 2%, and the same ROE
+   floor; the history test is >= 30% below the company's own five-year median
+   on >= 2 of PER, PBR and EV/EBITDA, plus the ROE floor.
 
 10. **Financials clear the absolute screen without EV/EBITDA.** Invariant 6
     suppresses EV/EBITDA for them, so a strict both-metrics rule excludes
@@ -239,6 +241,42 @@ rate per metric.
   reported as missing rather than as a number with a meaningless sign. 55 of
   240 KOSPI names hit this. The yearly figures always ship alongside the rate,
   so a turnaround like 한국전력 (-47,161억 -> +86,667억) is still visible.
+
+## Own five-year history
+
+The third screen compares today's PER, PBR and EV/EBITDA with the median of
+the company's last five FILED years (2021-2025 as of Sept 2026), from
+WiseReport's 투자지표 tab (`cF4002.aspx`, `rpt=5`). The 2026(E) column is an
+analyst estimate and is dropped. It catches what the other two screens cannot:
+a premium company that has de-rated. On KOSDAQ, where the absolute screen finds
+nothing, it found 7 names (JYP, 에스엠, 클래시스...) and took the total from 4
+to 9.
+
+- **Same rules as the peer screen.** Median, not mean (invariant 4) - 삼성전자
+  ran 36.8x PER in 2023, which would drag a mean. Non-positive and out-of-bounds
+  multiples are missing, in history as well as today (invariant 2), so a loss
+  year drops out of the benchmark rather than distorting it. EV/EBITDA is
+  skipped for financials (invariant 6). Fewer than 3 usable years: no benchmark.
+- **PER and PBR are comparable across the two providers; EV/EBITDA was not.**
+  WiseReport's EPS and BPS match Naver's exactly (8 of 8, including a bank and a
+  loss-maker - both are FnGuide underneath). yfinance's current EV/EBITDA did
+  NOT match WiseReport's history: only 18 of 30 within +/-25%, holdcos off by up
+  to 5x. At a 30% threshold that gap would manufacture signals, so current
+  EV/EBITDA is rebuilt from WiseReport's own figures (`current_ev_ebitda`):
+  carry forward its latest non-equity EV and move only equity by today's price.
+  Do not "simplify" this back to yfinance.
+- **Trailing multiples cut both ways here.** When earnings surge, the latest
+  filing lags the price and a stock reads EXPENSIVE against its history until
+  the next filing catches up (삼성전자, Sept 2026). A one-off gain does the
+  opposite: 대웅제약 reads 85% below its PER history. It still passes
+  legitimately because PBR - which a one-off does not move - is 36% below too.
+- **2 of 3, like the peer screen.** A name can clear while expensive on the
+  third metric - 한국카본 passes while 50% above its PBR history. The
+  `hist_avg_disc` column averages all three and shows the truth. Requiring all 3
+  would also exclude every financial, which has no EV/EBITDA.
+
+One WiseReport session token (`encparam`) serves every ticker; 40 names came
+back in 8s with 6 workers and no throttling.
 
 ## Publishing
 
