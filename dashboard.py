@@ -74,19 +74,26 @@ def _records(df: pd.DataFrame) -> list[dict]:
             "board": str(r.get("board", "")),
             "industry": "" if pd.isna(r.get("industry")) else str(r.get("industry")),
             "mcap_musd": _f(r.get("market_cap_usd", np.nan) / 1e6, 0),
-            "trailing_pe": _f(r.get("trailing_pe")),
-            "price_to_book": _f(r.get("price_to_book")),
-            "ev_to_ebitda": _f(r.get("ev_to_ebitda")),
-            "roe_pct": _f(r.get("roe_pct"), 1),
-            "div_yield": _f(r.get("div_yield")),
+            # The page re-runs both screens in the browser, so any value a
+            # THRESHOLD is applied to has to reach it at full precision.
+            # Rounded to 2dp a PBR of 0.99948 becomes 1.00 and stops being
+            # "below 1", so the page reports one absolute pass fewer than the
+            # funnel it sits under - and a page that disagrees with its own
+            # funnel is worth nothing. Display is unaffected: the table
+            # formats with toFixed at render time.
+            "trailing_pe": _f(r.get("trailing_pe"), 6),
+            "price_to_book": _f(r.get("price_to_book"), 6),
+            "ev_to_ebitda": _f(r.get("ev_to_ebitda"), 6),
+            "roe_pct": _f(r.get("roe_pct"), 6),
+            "div_yield": _f(r.get("div_yield"), 6),
             "avg_discount": _f(r.get("avg_discount"), 4),
             "metrics_passing": "" if pd.isna(r.get("metrics_passing")) else str(r.get("metrics_passing")),
             # Per-metric discounts and the financial flag travel with every row
             # so the page can re-evaluate both screens against thresholds the
             # reader chooses, instead of only showing the run's own verdict.
-            "disc_pe": _f(r.get("trailing_pe_discount"), 4),
-            "disc_pb": _f(r.get("price_to_book_discount"), 4),
-            "disc_ev": _f(r.get("ev_to_ebitda_discount"), 4),
+            "disc_pe": _f(r.get("trailing_pe_discount"), 6),
+            "disc_pb": _f(r.get("price_to_book_discount"), 6),
+            "disc_ev": _f(r.get("ev_to_ebitda_discount"), 6),
             "fin": bool(str(r.get("sector", "") or "").lower().find("financial") >= 0),
             # Three-year history, oldest first, in 억원. The yearly values
             # travel with the rate so a name whose CAGR is undefined (negative
@@ -101,8 +108,10 @@ def _records(df: pd.DataFrame) -> list[dict]:
             # Own five-year history. The medians and today's values let the
             # page re-threshold the screen; the yearly values feed the tooltip.
             "hist_years": str(r.get("hist_years", "") or ""),
-            "evx_now": _f(r.get("evx_now")),
-            "h_med": {k: _f(r.get(f"hist_{k}_med")) for k in ("per", "pbr", "evx")},
+            # evx_now and the medians carry full precision for the same
+            # reason: the discount between them is re-thresholded in the page.
+            "evx_now": _f(r.get("evx_now"), 6),
+            "h_med": {k: _f(r.get(f"hist_{k}_med"), 6) for k in ("per", "pbr", "evx")},
             "h_ser": {k: [_f(r.get(f"hist_{k}_y{i}")) for i in range(1, 6)]
                       for k in ("per", "pbr", "evx")},
             "hist_avg_disc": _f(r.get("hist_avg_disc"), 4),

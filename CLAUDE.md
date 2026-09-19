@@ -323,6 +323,13 @@ from the shipped rows:
 If the client-side verdict at default settings ever disagrees with the Python
 funnel, that is a real bug - they are computing the same thing twice.
 
+Which means **every value a threshold is applied to ships at full precision**,
+not the 2dp the table displays. `_records()` rounds those to 6dp and lets
+`toFixed` handle display; rounding them for the payload silently moves names
+across boundaries. 금호타이어 at PBR 0.996461 reads 1.00 at 2dp and stops being
+below 1 - the page said 62 where the funnel said 63. ROE at 1dp was worse,
+because it rounds the wrong way: 4.95% passes a 5% floor it fails.
+
 ## Interpretation
 
 Sort by `avg_discount`, then read `roe_pct` immediately. Low PBR + high ROE is
