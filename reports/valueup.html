@@ -1,0 +1,282 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="robots" content="noindex, nofollow">
+<meta name="color-scheme" content="light dark">
+<title>밸류업 이행 중간 점검</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans+KR:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500&display=swap">
+<style>
+html { -webkit-text-size-adjust: 100%; }
+body { margin: 0; }
+a { color: var(--accent); }
+
+/* Layout: one reading column (~760px) of sections; tables scroll inside their own box on phones. Disclosure-filing look: ruled tables, small caps labels, one slate-teal accent. */
+:root {
+  --bg: #f6f7f7;
+  --surface: #ffffff;
+  --fg: #1c2526;
+  --muted: #5b6b6d;
+  --rule: #d5dcdc;
+  --accent: #1f6f78;
+  --accent-soft: #e2eff0;
+  --up: #1d7a4c;
+  --down: #a4452c;
+  --flat: #6b7577;
+  --fin: #8a5a12;
+  --font-body: "IBM Plex Sans KR", "Apple SD Gothic Neo", "Malgun Gothic", system-ui, sans-serif;
+  --font-num: "IBM Plex Mono", ui-monospace, "SFMono-Regular", Menlo, monospace;
+  --step--1: 0.8125rem;
+  --step-0: 0.9375rem;
+  --step-1: 1.125rem;
+  --step-2: 1.5rem;
+  --step-3: 2rem;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #121819; --surface: #1a2223; --fg: #e3eaea; --muted: #97a7a9; --rule: #2e3b3d;
+    --accent: #6cc0c8; --accent-soft: #1d3436; --up: #5fc48f; --down: #e48a6f; --flat: #9aa6a8; --fin: #e0b25e;
+    color-scheme: dark;
+  }
+}
+:root[data-theme="dark"] {
+  --bg: #121819; --surface: #1a2223; --fg: #e3eaea; --muted: #97a7a9; --rule: #2e3b3d;
+  --accent: #6cc0c8; --accent-soft: #1d3436; --up: #5fc48f; --down: #e48a6f; --flat: #9aa6a8; --fin: #e0b25e;
+  color-scheme: dark;
+}
+* { box-sizing: border-box; }
+body {
+  background: var(--bg); color: var(--fg);
+  font-family: var(--font-body); font-size: var(--step-0); line-height: 1.65;
+  padding-inline: 16px; padding-block: 40px 64px;
+}
+main { max-width: 760px; margin-inline: auto; display: grid; gap: 44px; }
+header { display: grid; gap: 10px; }
+.eyebrow { font-size: var(--step--1); letter-spacing: 0.08em; color: var(--accent); font-weight: 600; }
+h1 { font-size: var(--step-3); line-height: 1.25; margin: 0; text-wrap: balance; font-weight: 700; }
+h2 { font-size: var(--step-2); line-height: 1.3; margin: 0; text-wrap: balance; font-weight: 600; }
+h3 { font-size: var(--step-1); margin: 0; font-weight: 600; }
+p { margin: 0; max-width: 65ch; }
+.lede { color: var(--muted); font-size: var(--step-1); line-height: 1.6; }
+.meta { display: flex; flex-wrap: wrap; gap: 6px 18px; font-size: var(--step--1); color: var(--muted); }
+.meta b { color: var(--fg); font-weight: 500; }
+section { display: grid; gap: 16px; }
+.num { font-family: var(--font-num); font-variant-numeric: tabular-nums; }
+.caveat {
+  background: var(--surface); border: 1px solid var(--rule); border-radius: 6px;
+  padding: 16px 18px; display: grid; gap: 8px;
+}
+.caveat ul, .notes ul { margin: 0; padding-left: 1.2em; display: grid; gap: 6px; }
+.caveat li, .notes li { max-width: 65ch; }
+.tablebox { overflow-x: auto; border-top: 2px solid var(--fg); }
+table { border-collapse: collapse; width: 100%; min-width: 560px; font-size: var(--step--1); }
+th, td { text-align: left; padding: 9px 10px; border-bottom: 1px solid var(--rule); vertical-align: top; }
+th { font-weight: 600; color: var(--muted); font-size: 0.75rem; letter-spacing: 0.04em; }
+td.r, th.r { text-align: right; }
+tbody tr.group td { background: var(--accent-soft); font-weight: 600; color: var(--fg); padding-block: 6px; }
+.delta { font-family: var(--font-num); font-variant-numeric: tabular-nums; white-space: nowrap; }
+.up { color: var(--up); } .down { color: var(--down); } .flat { color: var(--flat); }
+.small { font-size: var(--step--1); color: var(--muted); }
+.findings { display: grid; gap: 12px; margin: 0; padding: 0; list-style: none; }
+.findings li { display: grid; grid-template-columns: 7.5em 1fr; gap: 4px 16px; padding-block: 12px; border-bottom: 1px solid var(--rule); }
+.findings li:first-child { border-top: 1px solid var(--rule); }
+.findings .tag { font-size: var(--step--1); font-weight: 600; color: var(--accent); padding-top: 2px; }
+.findings p { min-width: 0; }
+@media (max-width: 520px) { .findings li { grid-template-columns: 1fr; } }
+figure { margin: 0; background: var(--surface); border: 1px solid var(--rule); border-radius: 6px; padding: 16px; display: grid; gap: 10px; }
+figcaption { font-size: var(--step--1); color: var(--muted); }
+svg text { font-family: var(--font-num); }
+.legend { display: flex; gap: 18px; flex-wrap: wrap; font-size: var(--step--1); color: var(--muted); }
+.swatch { display: inline-block; width: 18px; height: 3px; vertical-align: middle; margin-right: 6px; border-radius: 2px; }
+.notes { display: grid; gap: 10px; }
+footer { font-size: var(--step--1); color: var(--muted); border-top: 1px solid var(--rule); padding-top: 16px; display: grid; gap: 6px; }
+code { font-family: var(--font-num); font-size: 0.85em; background: var(--accent-soft); padding: 1px 5px; border-radius: 3px; }
+</style>
+
+</head>
+<body>
+<main>
+  <header>
+    <div class="eyebrow">기업가치 제고계획 · 공시 기업 129곳</div>
+    <h1>밸류업 이행 중간 점검</h1>
+    <p class="lede">밸류업을 공시한 회사가 공시 뒤 실제로 자본배분을 바꿨는지(Q1), 스스로 적은 목표를 지켰는지(Q2)를 같은 회사의 공시 전후와 같은 업종 비공시 기업에 견줘 정리했다.</p>
+    <div class="meta">
+      <span>기준일 <b class="num">2026-10-03</b> · 전수 점검 반영</span>
+      <span>사업연도 <b class="num">2015–2025</b></span>
+      <span>비교군 <b>비공시 기업 249곳</b></span>
+      <span>자료 <b>DART Open API · KRX(pykrx)</b></span>
+    </div>
+  </header>
+
+  <section class="caveat" aria-label="읽기 전에">
+    <h3>읽기 전에</h3>
+    <ul>
+      <li><b>공시 후는 사실상 2025 사업연도 한 해다.</b> 공시 후 해가 있는 회사는 2024년에 첫 본공시를 낸 41곳(일반 27, 금융 14)뿐이다. 2025·2026년 공시 85곳은 아직 공시 후 사업연도가 없다.</li>
+      <li>숫자는 모두 <b>중앙값을 정리한 기술 통계</b>다. 통계 검정은 하지 않았고, 인과를 말하지 않는다.</li>
+      <li>공시 기업은 코리아 밸류업 지수 편입 이력이 있는 회사라 원래 수익성이 높다. 비교군과의 수준 차이 일부는 이 선정에서 온다.</li>
+      <li>목표 판정은 대부분 아직 판정 전이다. 목표 연도가 오지 않았다.</li>
+    </ul>
+  </section>
+
+  <section>
+    <h2>요약</h2>
+    <ul class="findings">
+      <li><span class="tag">주주환원</span><p>환원율(배당 + 실제 자사주 취득 ÷ 지배주주 순이익) 중앙값이 일반 기업 <span class="num">26.1% → 41.3%</span>, 금융 <span class="num">35.1% → 44.6%</span>로 올랐다. 비교군과의 격차도 공시 뒤 벌어졌다(일반 기업 +5.4%p → +20.4%p).</p></li>
+      <li><span class="tag">수익성</span><p>일반 기업의 지배주주 ROE는 회사별 변화 중앙값이 <span class="num">+0.2%p</span>로 거의 그대로다(26곳 중 14곳 상승). 금융은 <span class="num">7.8% → 11.2%</span>로 14곳 중 13곳이 올랐다.</p></li>
+      <li><span class="tag">자사주 소각</span><p>금융은 소각 비율 중앙값이 <span class="num">0.56% → 2.34%</span>로 올랐다. 일반 기업은 중앙값이 0에 머물고 27곳 중 9곳만 늘었다. 소각 결정 공시는 공시 전후 12개월에 <span class="num">58 → 66건</span>이다.</p></li>
+      <li><span class="tag">목표 달성</span><p>판정된 것만 보면 ROE 목표 <span class="num">8건 달성 · 12건 미달</span>, 주주환원율 <span class="num">5 · 5</span>, 배당성향 <span class="num">7 · 1</span>, PBR <span class="num">2 · 2</span>. 나머지 191건은 판정 전이다.</p></li>
+    </ul>
+  </section>
+
+  <section>
+    <h2>Q1 · 공시 전후 자본배분</h2>
+    <p class="small">공시 전 = 첫 본공시 직전 3개 사업연도(t-3..t-1) 평균. 공시 후 = 공시 다음 사업연도부터(t≥1). 공시한 해(t=0)는 따로 둔다. 금융사(KSIC 64–66)는 따로 본다.</p>
+    <div class="tablebox">
+      <table>
+        <thead>
+          <tr><th>지표</th><th class="r">회사 수</th><th class="r">공시 전</th><th class="r">공시한 해</th><th class="r">공시 후</th><th class="r">변화(회사별 중앙값)</th><th class="r">오른 회사</th></tr>
+        </thead>
+        <tbody>
+          <tr class="group"><td colspan="7">일반 기업</td></tr>
+          <tr><td>주주환원율 (실제 취득)</td><td class="r num">26</td><td class="r num">26.1%</td><td class="r num">38.1%</td><td class="r num">41.3%</td><td class="r delta up">+7.3%p</td><td class="r num">20</td></tr>
+          <tr><td>주주환원율 (계획 금액)</td><td class="r num">26</td><td class="r num">27.3%</td><td class="r num">38.0%</td><td class="r num">38.1%</td><td class="r delta up">+4.5%p</td><td class="r num">18</td></tr>
+          <tr><td>ROE (지배주주)</td><td class="r num">26</td><td class="r num">9.3%</td><td class="r num">10.5%</td><td class="r num">8.1%</td><td class="r delta flat">+0.2%p</td><td class="r num">14</td></tr>
+          <tr><td>ROE (전체 순이익)</td><td class="r num">27</td><td class="r num">11.4%</td><td class="r num">11.3%</td><td class="r num">8.2%</td><td class="r delta flat">−0.3%p</td><td class="r num">13</td></tr>
+          <tr><td>PBR</td><td class="r num">26</td><td class="r num">1.15</td><td class="r num">1.48</td><td class="r num">1.01</td><td class="r delta flat">+0.03</td><td class="r num">13</td></tr>
+          <tr><td>PBR ÷ 지수 PBR</td><td class="r num">26</td><td class="r num">1.08</td><td class="r num">1.16</td><td class="r num">0.75</td><td class="r delta down">−0.23</td><td class="r num">8</td></tr>
+          <tr><td>소각 비율 (소각 직전 주식수 대비)</td><td class="r num">27</td><td class="r num">0.00%</td><td class="r num">0.00%</td><td class="r num">0.00%</td><td class="r delta flat">0.00%p</td><td class="r num">9</td></tr>
+          <tr><td>자기주식 비율</td><td class="r num">21</td><td class="r num">2.93%</td><td class="r num">1.56%</td><td class="r num">2.38%</td><td class="r delta flat">0.00%p</td><td class="r num">7</td></tr>
+          <tr><td>이사회 안건 중 자본배분 비중</td><td class="r num">24</td><td class="r num">7.3%</td><td class="r num">9.9%</td><td class="r num">10.6%</td><td class="r delta up">+3.5%p</td><td class="r num">17</td></tr>
+          <tr class="group"><td colspan="7">금융</td></tr>
+          <tr><td>주주환원율 (실제 취득)</td><td class="r num">12</td><td class="r num">35.1%</td><td class="r num">36.1%</td><td class="r num">44.6%</td><td class="r delta up">+2.5%p</td><td class="r num">9</td></tr>
+          <tr><td>주주환원율 (계획 금액)</td><td class="r num">12</td><td class="r num">36.3%</td><td class="r num">33.7%</td><td class="r num">46.8%</td><td class="r delta up">+2.3%p</td><td class="r num">8</td></tr>
+          <tr><td>ROE (지배주주)</td><td class="r num">14</td><td class="r num">7.8%</td><td class="r num">8.5%</td><td class="r num">11.2%</td><td class="r delta up">+1.4%p</td><td class="r num">13</td></tr>
+          <tr><td>ROE (전체 순이익)</td><td class="r num">14</td><td class="r num">7.9%</td><td class="r num">8.7%</td><td class="r num">11.8%</td><td class="r delta up">+2.0%p</td><td class="r num">12</td></tr>
+          <tr><td>PBR</td><td class="r num">14</td><td class="r num">0.46</td><td class="r num">0.55</td><td class="r num">0.81</td><td class="r delta up">+0.36</td><td class="r num">12</td></tr>
+          <tr><td>PBR ÷ 지수 PBR</td><td class="r num">14</td><td class="r num">0.48</td><td class="r num">0.64</td><td class="r num">0.60</td><td class="r delta up">+0.12</td><td class="r num">12</td></tr>
+          <tr><td>소각 비율 (소각 직전 주식수 대비)</td><td class="r num">14</td><td class="r num">0.56%</td><td class="r num">1.78%</td><td class="r num">2.34%</td><td class="r delta up">+1.65%p</td><td class="r num">11</td></tr>
+          <tr><td>자기주식 비율</td><td class="r num">14</td><td class="r num">2.60%</td><td class="r num">3.21%</td><td class="r num">1.91%</td><td class="r delta flat">−0.09%p</td><td class="r num">4</td></tr>
+          <tr><td>이사회 안건 중 자본배분 비중</td><td class="r num">14</td><td class="r num">9.7%</td><td class="r num">7.3%</td><td class="r num">12.4%</td><td class="r delta up">+3.3%p</td><td class="r num">10</td></tr>
+        </tbody>
+      </table>
+    </div>
+    <p class="small">'공시 전·공시한 해·공시 후' 칸은 그 구간 값의 회사 간 중앙값이고, '변화'는 회사마다 (공시 후 − 공시 전)을 구한 뒤의 중앙값이라 두 칸의 차와 다를 수 있다. 회사 수는 공시 전·후 값이 둘 다 있는 회사다. PBR ÷ 지수 PBR 은 같은 날 KOSPI·KOSDAQ 지수 PBR 로 나눈 값이다.</p>
+  </section>
+
+  <section>
+    <h2>비교군과의 격차</h2>
+    <p class="small">공시 기업마다 같은 업종(KSIC 2자리)에서 2023년 말 시가총액이 가장 가까운 비공시 기업 2곳을 짝으로 두고, 해마다 <b>공시 기업 값 − 짝 2곳 평균</b>을 구했다. 짝이 없는 5곳(S-Oil, 코웨이, 팬오션, KT&amp;G, 강원랜드)은 다른 밸류업 기업 전체 평균과 견줬다. 표는 회사·연도 단위 격차의 중앙값이다.</p>
+    <figure>
+      <svg viewBox="0 0 640 230" role="img" aria-label="주주환원율 격차: 일반 기업 5.4, 16.9, 20.4 퍼센트포인트, 금융 12.1, 13.9, 27.8 퍼센트포인트" style="width:100%;height:auto;max-width:100%">
+        <g stroke="var(--rule)" stroke-width="1">
+          <line x1="70" y1="190" x2="600" y2="190"/>
+          <line x1="70" y1="140" x2="600" y2="140" stroke-dasharray="3 4"/>
+          <line x1="70" y1="90" x2="600" y2="90" stroke-dasharray="3 4"/>
+          <line x1="70" y1="40" x2="600" y2="40" stroke-dasharray="3 4"/>
+        </g>
+        <g font-size="12" fill="var(--muted)" text-anchor="end">
+          <text x="60" y="194">0</text>
+          <text x="60" y="144">+10</text>
+          <text x="60" y="94">+20</text>
+          <text x="60" y="44">+30%p</text>
+        </g>
+        <g font-size="13" fill="var(--muted)" text-anchor="middle">
+          <text x="140" y="215">공시 전</text>
+          <text x="335" y="215">공시한 해</text>
+          <text x="530" y="215">공시 후</text>
+        </g>
+        <polyline fill="none" stroke="var(--accent)" stroke-width="2.5" points="140,162.9 335,105.7 530,87.8"/>
+        <g fill="var(--accent)"><circle cx="140" cy="162.9" r="4.5"/><circle cx="335" cy="105.7" r="4.5"/><circle cx="530" cy="87.8" r="5.5"/></g>
+        <g font-size="12" fill="var(--accent)"><text x="148" y="157">5.4</text><text x="343" y="97">16.9</text><text x="540" y="84">20.4</text></g>
+        <polyline fill="none" stroke="var(--fin)" stroke-width="2.5" points="140,129.4 335,120.7 530,51.1"/>
+        <g fill="var(--fin)"><circle cx="140" cy="129.4" r="4.5"/><circle cx="335" cy="120.7" r="4.5"/><circle cx="530" cy="51.1" r="5.5"/></g>
+        <g font-size="12" fill="var(--fin)"><text x="148" y="123">12.1</text><text x="343" y="138" text-anchor="start">13.9</text><text x="540" y="55">27.8</text></g>
+      </svg>
+      <div class="legend"><span><span class="swatch" style="background:var(--accent)"></span>일반 기업</span><span><span class="swatch" style="background:var(--fin)"></span>금융</span></div>
+      <figcaption>주주환원율(실제 취득 기준) 격차, 공시 기업 − 짝 평균의 중앙값. 공시 후 표본은 일반 20, 금융 10 회사·연도로 작다.</figcaption>
+    </figure>
+    <div class="tablebox">
+      <table>
+        <thead>
+          <tr><th>지표 (공시 기업 − 비교 평균)</th><th class="r">공시 전</th><th class="r">공시한 해</th><th class="r">공시 후</th></tr>
+        </thead>
+        <tbody>
+          <tr class="group"><td colspan="4">일반 기업</td></tr>
+          <tr><td>주주환원율 (실제 취득)</td><td class="r num">+5.4%p <span class="small">(200)</span></td><td class="r num">+16.9%p <span class="small">(40)</span></td><td class="r num">+20.4%p <span class="small">(20)</span></td></tr>
+          <tr><td>ROE (지배주주)</td><td class="r num">+9.5%p <span class="small">(319)</span></td><td class="r num">+8.1%p <span class="small">(64)</span></td><td class="r num">+7.1%p <span class="small">(27)</span></td></tr>
+          <tr><td>PBR</td><td class="r num">−0.38 <span class="small">(319)</span></td><td class="r num">−0.09 <span class="small">(64)</span></td><td class="r num">−0.51 <span class="small">(27)</span></td></tr>
+          <tr><td>소각 비율</td><td class="r num">0.00%p <span class="small">(321)</span></td><td class="r num">0.00%p <span class="small">(65)</span></td><td class="r num">0.00%p <span class="small">(28)</span></td></tr>
+          <tr><td>자기주식 비율</td><td class="r num">+0.07%p <span class="small">(221)</span></td><td class="r num">+0.19%p <span class="small">(46)</span></td><td class="r num">−0.26%p <span class="small">(20)</span></td></tr>
+          <tr class="group"><td colspan="4">금융</td></tr>
+          <tr><td>주주환원율 (실제 취득)</td><td class="r num">+12.1%p <span class="small">(25)</span></td><td class="r num">+13.9%p <span class="small">(14)</span></td><td class="r num">+27.8%p <span class="small">(10)</span></td></tr>
+          <tr><td>ROE (지배주주)</td><td class="r num">+3.1%p <span class="small">(34)</span></td><td class="r num">+5.5%p <span class="small">(18)</span></td><td class="r num">+6.5%p <span class="small">(14)</span></td></tr>
+          <tr><td>PBR</td><td class="r num">+0.10 <span class="small">(34)</span></td><td class="r num">+0.19 <span class="small">(18)</span></td><td class="r num">+0.34 <span class="small">(14)</span></td></tr>
+          <tr><td>소각 비율</td><td class="r num">0.00%p <span class="small">(34)</span></td><td class="r num">+1.42%p <span class="small">(18)</span></td><td class="r num">+1.09%p <span class="small">(14)</span></td></tr>
+          <tr><td>자기주식 비율</td><td class="r num">−1.70%p <span class="small">(28)</span></td><td class="r num">−1.30%p <span class="small">(18)</span></td><td class="r num">−0.88%p <span class="small">(13)</span></td></tr>
+        </tbody>
+      </table>
+    </div>
+    <p class="small">괄호 안은 회사·연도 수. 공시 전은 여러 해가 들어가 표본이 크고, 공시 후는 2025 사업연도뿐이다. 일반 기업의 ROE 격차는 공시 전부터 +9%p 안팎으로, 공시 기업이 원래 더 수익성 높은 회사라는 뜻이다.</p>
+  </section>
+
+  <section>
+    <h2>공시 전후 사건 수</h2>
+    <p class="small">첫 본공시일 전후 12·24개월 안의 주요사항보고·결과보고 건수. 2026년 공시 46곳은 공시 뒤 기간이 몇 달뿐이라 공시 후 건수가 적게 잡힌다.</p>
+    <div class="tablebox">
+      <table>
+        <thead>
+          <tr><th>사건</th><th class="r">12개월 전</th><th class="r">12개월 후</th><th class="r">24개월 전</th><th class="r">24개월 후</th><th class="r">회사 수 (12개월 전 → 후)</th></tr>
+        </thead>
+        <tbody>
+          <tr><td>자기주식 소각 결정</td><td class="r num">58</td><td class="r num">66</td><td class="r num">88</td><td class="r num">115</td><td class="r num">39 → 42</td></tr>
+          <tr><td>자기주식 소각 완료</td><td class="r num">47</td><td class="r num">45</td><td class="r num">67</td><td class="r num">82</td><td class="r num">35 → 37</td></tr>
+          <tr><td>자기주식 취득 결정</td><td class="r num">42</td><td class="r num">43</td><td class="r num">74</td><td class="r num">66</td><td class="r num">21 → 26</td></tr>
+          <tr><td>자기주식 취득 결과보고</td><td class="r num">43</td><td class="r num">44</td><td class="r num">73</td><td class="r num">65</td><td class="r num">22 → 28</td></tr>
+          <tr><td>현금배당 결정</td><td class="r num">183</td><td class="r num">154</td><td class="r num">352</td><td class="r num">251</td><td class="r num">124 → 94</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </section>
+
+  <section>
+    <h2>Q2 · 스스로 적은 목표</h2>
+    <p class="small">계획 공시마다 따로 판정한다. 목표 연도가 적혀 있으면 그 해에, 없으면 공시 뒤 사업연도마다. 기준은 관대한 쪽(B)이다: '이상·초과·유지·달성' 은 실적 ≥ 목표, '수준·내외' 는 목표 ± 1%p, 범위 목표는 하한 이상, '지향·검토' 는 판정하지 않는다. 실적은 회사 정의에 가장 가까운 값을 쓴다(ROE 는 지배주주 기준, 주주환원율은 실제 취득 기준, 배당성향은 회사가 적은 현금배당성향). 목표 문장이 별도 기준이면 별도 순이익으로 나눈다.</p>
+    <div class="tablebox">
+      <table>
+        <thead>
+          <tr><th>목표</th><th class="r">달성</th><th class="r">미달</th><th class="r">판정 전</th><th>판정된 것의 시점</th></tr>
+        </thead>
+        <tbody>
+          <tr><td>ROE</td><td class="r num up">8</td><td class="r num down">12</td><td class="r num">66</td><td>모두 2025 사업연도, 목표 연도 없는 계획</td></tr>
+          <tr><td>주주환원율</td><td class="r num up">5</td><td class="r num down">5</td><td class="r num">64</td><td>2025 사업연도 (미달 1건은 목표 연도가 2025인 계획)</td></tr>
+          <tr><td>배당성향</td><td class="r num up">7</td><td class="r num down">1</td><td class="r num">45</td><td>2025 사업연도</td></tr>
+          <tr><td>PBR</td><td class="r num up">2</td><td class="r num down">2</td><td class="r num">16</td><td>2025 사업연도</td></tr>
+        </tbody>
+      </table>
+    </div>
+    <p class="small">건수는 (계획 × 사업연도) 단위다. 목표 연도가 2026 이후인 계획은 모두 판정 전이고, 2026 사업연도 실적은 2027년 봄에 나온다.</p>
+  </section>
+
+  <section class="notes">
+    <h2>자료와 바로잡은 것</h2>
+    <ul>
+      <li><b>표본.</b> 공시 기업 129곳(일반 110, 금융 19). 첫 본공시 시점: 2024년 43곳, 2025년 40곳, 2026년 46곳 — 129곳 전부 유니버스 CSV 의 첫 공시일과 같다. 비교군 251곳 중 249곳이 패널에 들어갔고, 2021년 이후로는 비교 값이 없는 공시 기업이 없다.</li>
+      <li><b>시장 구분.</b> 일별 주가 표의 시장 칸이 모든 회사를 KOSDAQ 으로 적고 있었다(실제 공시 기업은 KOSPI 94, KOSDAQ 34). 해마다 연말 상장 목록으로 정하도록 고쳤다. 지수 대비 PBR 은 이 수정 뒤 값이다.</li>
+      <li><b>비교군 재무.</b> DART 가 한 묶음(100곳)에 HTTP 200 으로 HTML 오류 페이지를 보냈는데 수집기가 '받음' 으로 적어 101곳 재무가 비어 있었다. 이런 응답을 체크포인트로 남기지 않게 고치고 다시 받았다.</li>
+      <li><b>이사회 안건.</b> 비교군 원문 3,400여 건에서 새 서식이 나와 안건 나누기 규칙을 고쳤다. 공시 기업 쪽은 7곳(숲, 동진쎄미켐, HD현대인프라코어, 고려아연, 솔브레인, 한국항공우주, 심텍)의 안건 경계·보고/결의 구분이 바로잡혔다. 원문 대조 전수 감사 0, 위치 확인 0.</li>
+      <li><b>전수 점검 (2026-10-03).</b> 첫 판을 낸 뒤 마트 전체를 다시 훑어 고쳤다. '[첨부추가]' 를 정정으로 보아 첫 본공시일이 늦거나 없던 3곳(미스토홀딩스·한미약품·비츠로셀), 외화 재무제표 4곳의 PBR·지배주주 ROE(원화 시가총액 ÷ 달러 자본이라 비운다), 액면분할 뒤 다시 적힌 누계로 생긴 가짜 소각(SK텔레콤 2021), 소각 비율 분모(소각마다 그때 주식수로), 정정·자회사 공시가 소각 결정으로 세진 131건, 정정된 취득 결과보고서 이중 계산 5건, 별도 기준 환원 목표 20건의 판정 기준, 실적 줄을 목표로 읽은 밸류업 공시 14건. 사용자 승인으로 229640 2025 주식총수 표의 단위 오기(÷10⁶)를 고치고, 미스토홀딩스 정정 공시(회사가 본 공시라 밝힘)의 목표를 판정에 넣었다.</li>
+      <li><b>분석 빌드 경합.</b> 매시 도는 주가 수집이 분석 빌드 중에 일별 주가 표를 다시 만들어 시가총액이 비는 일이 있었다. 분석 빌드가 주가 수집 잠금도 잡게 고치고 다시 만들었다.</li>
+    </ul>
+  </section>
+
+  <footer>
+    <p>기술 통계 정리이며 투자 판단·추천이 아니다. 자료는 DART Open API 와 KRX(pykrx) 공개 자료이고, 정의·추출 기준은 별도 데이터 저장소에 있다.</p>
+    <p>이 페이지는 <b>2026-10-03 시점 스냅샷</b>이다 — 스크리너와 달리 매일 다시 만들지 않는다. <a href="index.html">KOSPI 스크리너</a> · <a href="kosdaq.html">KOSDAQ 스크리너</a></p>
+  </footer>
+</main>
+
+</body>
+</html>

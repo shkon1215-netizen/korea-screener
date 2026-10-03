@@ -285,6 +285,13 @@ Live: https://shkon1215-netizen.github.io/korea-screener/ (KOSDAQ at
 repo itself is public, which free Pages requires. No screen output is
 committed; results are regenerated on every run.
 
+**`/valueup.html` is not a screen.** It is a hand-made snapshot from the
+separate governance data project (Value-up disclosers: did pledges become
+capital-allocation change?), committed under `reports/` and only copied by
+`build_site.py`. It is not rebuilt on schedule and says so on the page. To
+refresh it, regenerate it in that project and replace `reports/valueup.html`.
+`build_site.py` refuses any report page without its own `noindex` meta.
+
 
 `.github/workflows/screen.yml` runs both boards at 07:30 UTC (16:30 KST) on
 weekdays, builds `site/`, and deploys to GitHub Pages. KOSDAQ is

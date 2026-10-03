@@ -4,6 +4,7 @@ Reads whatever result files exist and writes a self-contained `site/` folder:
 
     site/index.html    KOSPI
     site/kosdaq.html   KOSDAQ
+    site/valueup.html  static report pages copied from reports/ (not rebuilt)
     site/robots.txt    disallow everything
     site/.nojekyll     stop Pages mangling the output
 
@@ -22,6 +23,11 @@ from dashboard import build_dashboard
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 SITE = os.path.join(HERE, "site")
+# Hand-made report pages published next to the screener. They are snapshots
+# from the separate governance data project (Value-up implementation check)
+# and say so on the page; the build only copies them. Each must carry its own
+# noindex meta - robots.txt alone does not keep a linked page out of an index.
+REPORTS = os.path.join(HERE, "reports")
 
 # (board, results stem, output filename, label)
 PAGES = [
@@ -67,6 +73,18 @@ def main() -> int:
             noindex=True,
         )
         print(f"  {board:<7} -> site/{out}  ({os.path.getsize(path):,} bytes)")
+
+    if os.path.isdir(REPORTS):
+        for name in sorted(os.listdir(REPORTS)):
+            if not name.endswith(".html"):
+                continue
+            src = os.path.join(REPORTS, name)
+            with open(src, encoding="utf-8") as fh:
+                if 'name="robots" content="noindex' not in fh.read(4096):
+                    print(f"  skipped reports/{name}: no noindex meta", file=sys.stderr)
+                    continue
+            shutil.copyfile(src, os.path.join(SITE, name))
+            print(f"  report  -> site/{name}  ({os.path.getsize(src):,} bytes)")
 
     with open(os.path.join(SITE, "robots.txt"), "w", encoding="utf-8") as fh:
         fh.write(ROBOTS)
