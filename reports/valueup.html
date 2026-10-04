@@ -125,7 +125,7 @@ code { font-family: var(--font-num); font-size: 0.85em; background: var(--accent
     <h2>요약</h2>
     <ul class="findings">
       <li><span class="tag">주주환원</span><p>환원율(배당 + 실제 자사주 취득 ÷ 지배주주 순이익) 중앙값이 일반 기업 <span class="num">26.1% → 41.3%</span>, 금융 <span class="num">35.1% → 44.6%</span>로 올랐다. 같은 업종 짝과의 격차도 공시 뒤 벌어졌다(일반 기업 +8.2%p → +20.4%p).</p></li>
-      <li><span class="tag">수익성</span><p>일반 기업의 지배주주 ROE 중앙값은 <span class="num">9.3% → 8.1%</span>로 낮아졌지만, 회사별로는 26곳 중 14곳이 올랐고 변화 중앙값은 <span class="num">+0.2%p</span>다 — 업종 사이 차이가 컸다(아래 Q1). 같은 업종 짝과의 ROE 격차는 <span class="num">+4.2%p → +7.1%p</span>로 넓어졌다. 금융은 <span class="num">7.8% → 11.2%</span>로 14곳 중 13곳이 올랐다.</p></li>
+      <li><span class="tag">수익성</span><p>일반 기업 ROE 는 줄었다고 보기 어렵다 — 중앙값은 <span class="num">9.3% → 8.1%</span>로 낮아졌지만 회사별로는 26곳 중 14곳이 올랐고 변화 중앙값은 <span class="num">+0.2%p</span>다. 업종마다 방향이 반대였다(<a href="#roe">아래</a>). 같은 업종 짝과의 ROE 격차는 <span class="num">+4.2%p → +7.1%p</span>로 넓어졌다. 금융은 <span class="num">7.8% → 11.2%</span>로 14곳 중 13곳이 올랐다.</p></li>
       <li><span class="tag">자사주 소각</span><p>금융은 소각 비율 중앙값이 <span class="num">0.56% → 2.34%</span>로 올랐다. 일반 기업은 중앙값이 0에 머물고 27곳 중 9곳만 늘었다. 공시 뒤 1년이 다 지난 82곳에서 소각 결정은 공시 전후 12개월 <span class="num">46 → 54건</span>, 현금배당 결정은 <span class="num">116 → 137건</span>이다.</p></li>
       <li><span class="tag">목표 달성</span><p>판정된 것만 보면 ROE 목표 <span class="num">8건 달성 · 12건 미달</span>, 주주환원율 <span class="num">5 · 5</span>, 배당성향 <span class="num">7 · 1</span>, PBR <span class="num">2 · 2</span>. 나머지 191건은 판정 전이다.</p></li>
     </ul>
@@ -164,7 +164,40 @@ code { font-family: var(--font-num); font-size: 0.85em; background: var(--accent
       </table>
     </div>
     <p class="small">'공시 전·공시한 해·공시 후' 칸은 그 구간 값의 회사 간 중앙값이고, '변화'는 회사마다 (공시 후 − 공시 전)을 구한 뒤의 중앙값이라 두 칸의 차와 다를 수 있다. 회사 수는 공시 전·후 값이 둘 다 있는 회사다. PBR ÷ 지수 PBR 은 같은 날 KOSPI·KOSDAQ 지수 PBR 로 나눈 값이다.</p>
-    <p class="small"><b>일반 기업 ROE 가 '내려 보이는' 까닭.</b> 공시 전·후 칸은 각각의 중앙값이라 회사 구성이 같아도 분포가 바뀌면 움직인다. 26곳 중 14곳은 올랐다. 크게 내린 곳은 반도체·전자 부품(DB하이텍 26.0% → 11.3%, LG이노텍 20.6% → 5.9%, 이녹스첨단소재·드림텍), SK텔레콤(12.0% → 3.2%), POSCO홀딩스, 대한항공, 기아·현대차이고, 크게 오른 곳은 SK하이닉스(0.6% → 35.6%), HD현대일렉트릭·HD현대중공업, 지역난방공사·한전기술이다. 공시 전 3년(2021~2023)에 업황 고점이 들어간 회사와 2025년에 호황을 맞은 회사가 갈렸다. 우리 2025 ROE 는 KRX 의 EPS ÷ BPS 와 26곳 중앙값 0.3%p 차이로 맞는다(크게 다른 다우데이타·이녹스첨단소재는 분모 차이 — 우리는 비지배지분을 포함한 자본총계).</p>
+    <p class="small">일반 기업 ROE 는 중앙값이 내려 보이지만 회사별로는 거의 그대로다 — 아래 <a href="#roe">'일반 기업 ROE, 줄었나'</a>.</p>
+  </section>
+
+  <section id="roe">
+    <h2>일반 기업 ROE, 줄었나</h2>
+    <p><b>줄었다고 보기 어렵다.</b> 낮아진 것은 회사들의 대푯값(중앙값)이고, 회사 하나하나는 대체로 그대로다. 대상은 2024년에 공시해 공시 후 사업연도(2025)가 있는 일반 기업 26곳, 지배주주 ROE 기준이다.</p>
+    <div class="tablebox">
+      <table>
+        <thead><tr><th>보는 법</th><th class="r">공시 전 (2021~2023 평균)</th><th class="r">공시 후 (2025)</th></tr></thead>
+        <tbody>
+          <tr><td>26곳 ROE 의 중앙값</td><td class="r num">9.3%</td><td class="r num">8.1%</td></tr>
+          <tr><td>회사별 변화의 중앙값</td><td class="r"></td><td class="r num">+0.2%p</td></tr>
+          <tr><td>회사별 변화의 평균</td><td class="r"></td><td class="r num">+1.4%p</td></tr>
+          <tr><td>ROE 가 오른 회사</td><td class="r"></td><td class="r num">26곳 중 14곳</td></tr>
+          <tr><td>같은 업종 짝 기업 ROE 중앙값</td><td class="r num">5.0%</td><td class="r num">3.3%</td></tr>
+          <tr><td>공시 기업 − 짝 기업 격차</td><td class="r num">+4.2%p</td><td class="r num">+7.1%p</td></tr>
+        </tbody>
+      </table>
+    </div>
+    <p><b>업종마다 방향이 반대였다.</b> 공시 전 3년이 업황 고점이던 회사는 내리고, 2025년에 호황을 맞은 회사는 크게 올랐다. 이 엇갈림이 중앙값을 끌어내렸다.</p>
+    <div class="tablebox">
+      <table>
+        <thead><tr><th>크게 내린 곳</th><th class="r">공시 전 → 후</th><th>크게 오른 곳</th><th class="r">공시 전 → 후</th></tr></thead>
+        <tbody>
+          <tr><td>DB하이텍</td><td class="r num">26.0% → 11.3%</td><td>SK하이닉스</td><td class="r num">0.6% → 35.6%</td></tr>
+          <tr><td>LG이노텍</td><td class="r num">20.6% → 5.9%</td><td>HD현대일렉트릭</td><td class="r num">13.0% → 36.0%</td></tr>
+          <tr><td>드림텍</td><td class="r num">14.2% → 2.7%</td><td>HD현대중공업</td><td class="r num">−6.9% → 15.2%</td></tr>
+          <tr><td>SK텔레콤</td><td class="r num">12.0% → 3.2%</td><td>지역난방공사</td><td class="r num">−0.1% → 14.7%</td></tr>
+          <tr><td>이녹스첨단소재</td><td class="r num">18.8% → 10.7%</td><td>한전기술</td><td class="r num">4.2% → 13.7%</td></tr>
+        </tbody>
+      </table>
+    </div>
+    <p class="small">내린 쪽은 반도체·전자 부품, 통신(SK텔레콤은 2025년 해킹 사고 비용), 그 밖에 POSCO홀딩스·대한항공·기아·현대차. 오른 쪽은 메모리, 조선·전력기기, 에너지 공기업이다. 2025년은 시장 전체가 부진해 같은 업종 짝 기업의 ROE 가 더 많이 내렸고, 그래서 공시 기업과의 격차는 오히려 넓어졌다.</p>
+    <p class="small"><b>주의.</b> 공시 후는 2025년 한 해, 26곳뿐이라 업황 영향이 크게 섞인다 — 밸류업 공시의 효과라고 말하기는 이르다. 수치는 KRX 의 EPS ÷ BPS 와 26곳 중앙값 0.3%p 차이로 맞는다(크게 다른 다우데이타·이녹스첨단소재는 분모 차이 — 우리 값은 비지배지분을 포함한 자본총계로 나눈다).</p>
   </section>
 
   <section>
