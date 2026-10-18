@@ -3,12 +3,16 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-VALUATION_METRICS = ("trailing_pe", "price_to_book", "ev_to_ebitda")
+# P/FCF is the fourth: market cap over the last filed free cash flow
+# (korea_filters.add_cashflow_metrics). The relative test is unchanged -
+# 20% below peers on at least two of the metrics a company has.
+VALUATION_METRICS = ("trailing_pe", "price_to_book", "ev_to_ebitda", "price_to_fcf")
 
 METRIC_LABELS = {
     "trailing_pe": "PER",
     "price_to_book": "PBR",
     "ev_to_ebitda": "EV/EBITDA",
+    "price_to_fcf": "P/FCF",
 }
 
 # KRX reports PER/PBR as 0 for loss-making or negative-equity firms.
@@ -17,6 +21,7 @@ METRIC_BOUNDS = {
     "trailing_pe": (1.0, 200.0),
     "price_to_book": (0.05, 30.0),
     "ev_to_ebitda": (0.5, 100.0),
+    "price_to_fcf": (1.0, 200.0),
 }
 
 
@@ -59,7 +64,15 @@ class ScreenConfig:
 
     # Cash actually returned - the core of the Value-Up push. A missing yield
     # fails: unknown is not the same as paid.
+    # The 2% payout floor, now on the SHAREHOLDER yield (dividends + 자사주
+    # buybacks - issuance); the dividend yield where no cash flow was filed.
     abs_min_div_yield: float = 2.0        # 0 disables
+
+    # --- One-off guard (korea_filters.apply_oneoff_guard) ---
+    oneoff_guard: bool = True
+    oneoff_ratio: float = 1.5
+    # 법인세 top rate plus local income tax.
+    oneoff_tax_pct: float = 24.0
 
     # 관리종목. KIND publishes the list free, but by company NAME only.
     exclude_admin_issue: bool = True

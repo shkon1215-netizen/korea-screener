@@ -4,7 +4,13 @@ Finds KOSPI and KOSDAQ stocks trading at a discount to their industry peers on
 PER, PBR, and EV/EBITDA.
 
 **Defaults:** market cap ≥ USD 600M (~₩832bn) · median daily traded value ≥
-USD 4M (~₩5.5bn) · ≥20% below peer median on ≥2 of 3 metrics.
+USD 4M (~₩5.5bn) · ≥20% below peer median on ≥2 of 4 metrics (P/E, P/B, EV/EBITDA, P/FCF).
+
+
+**Also:** the outright screen's 2% payout floor counts buybacks (shareholder
+yield = dividends + buybacks − issuance), and trailing profit far above
+operating profit — a tax credit, an investment gain — is capped at
+operating profit after tax before scoring (tagged `one-off`).
 
 ## Setup
 

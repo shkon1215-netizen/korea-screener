@@ -94,6 +94,69 @@ def make_universe() -> pd.DataFrame:
     return pd.DataFrame(rows)
 
 
+
+def check_cashflow_oneoff() -> list[str]:
+    """P/FCF, the shareholder yield and the one-off guard on Korea's filed
+    figures (억원 for the P&L rows, won for the cash-flow rows)."""
+    from providers_naver_kr import cashflow_fields
+    fails: list[str] = []
+
+    def chk(cond, label):
+        print(f"  {'OK  ' if cond else 'FAIL'} {label}")
+        if not cond:
+            fails.append(label)
+
+    print("\n=== cash flow, shareholder yield, one-off guard ===")
+    lf = pd.Timestamp("2025-12-31")
+    cf = pd.DataFrame({lf: {"Operating Cash Flow": 150e9, "Capital Expenditure": -50e9,
+                            "Free Cash Flow": 100e9, "Cash Dividends Paid": -20e9,
+                            "Repurchase Of Capital Stock": -30e9,
+                            "Issuance Of Capital Stock": 10e9}})
+    chk(cashflow_fields(cf, lf) == {"lf_fcf": 100e9, "lf_div_paid": 20e9,
+                                    "lf_buyback": 30e9, "lf_issuance": 10e9},
+        "cash-flow rows read as positive amounts in won")
+    chk(np.isnan(cashflow_fields(cf, pd.Timestamp("2024-12-31"))["lf_fcf"]),
+        "no column for the filed year -> missing")
+
+    df = pd.DataFrame([
+        dict(ticker="000001", sector="Industrials", market_cap_local=2e12, lf_fcf=100e9,
+             lf_div_paid=20e9, lf_buyback=30e9, lf_issuance=10e9),
+        dict(ticker="000002", sector="Financial Services", market_cap_local=2e12, lf_fcf=900e9,
+             lf_div_paid=60e9, lf_buyback=0.0, lf_issuance=0.0),
+    ])
+    out, _ = KF.add_cashflow_metrics(df)
+    i = out.set_index("ticker")
+    chk(i.loc["000001", "price_to_fcf"] == 20.0 and abs(i.loc["000001", "sh_yield"] - 2.0) < 1e-9,
+        "P/FCF 20, shareholder yield 2% (자사주 매입 counts)")
+    chk(np.isnan(i.loc["000002", "price_to_fcf"]) and i.loc["000002", "sh_yield"] == 3.0,
+        "a financial has no P/FCF but keeps its shareholder yield")
+
+    cfg = ScreenConfig()
+    tax = cfg.oneoff_tax_pct / 100.0
+
+    def row(t, nps, ops, pe=10.0, eps=5000.0, sector="Industrials"):
+        r = dict(ticker=t, sector=sector, trailing_pe=pe, trailing_eps=eps)
+        for k, (n_, o) in enumerate(zip(nps, ops), 1):
+            r[f"np_y{k}"], r[f"op_y{k}"] = n_, o
+        return r
+    g = pd.DataFrame([
+        row("ONEOFF", (100, 110, 900), (130, 140, 150), pe=3.0),      # gain in the latest year
+        row("PLAIN", (100, 110, 120), (130, 145, 160), pe=12.0),
+        row("HOLDCO", (900, 950, 1000), (300, 310, 320)),            # always above: structural
+        row("BANK", (100, 110, 900), (130, 140, 150), sector="Financial Services"),
+    ])
+    o, _ = KF.apply_oneoff_guard(g, cfg)
+    j = o.set_index("ticker")
+    k = 150 * (1 - tax) / 900
+    chk(bool(j.loc["ONEOFF", "oneoff_capped"]) and abs(j.loc["ONEOFF", "trailing_pe"] - 3.0 / k) < 1e-9,
+        "one-off in the filed year: PER restated on operating profit after tax")
+    chk(not bool(j.loc["PLAIN", "oneoff_capped"]) and j.loc["PLAIN", "trailing_pe"] == 12.0,
+        "an ordinary company is untouched")
+    chk(not bool(j.loc["HOLDCO", "oneoff_capped"]) and bool(j.loc["HOLDCO", "oneoff_structural"]),
+        "a holdco's equity-method income, there every year, is spared")
+    chk(not bool(j.loc["BANK", "oneoff_capped"]), "financials exempt")
+    return fails
+
 def main() -> int:
     cfg = ScreenConfig()
     df = make_universe()
@@ -115,7 +178,7 @@ def main() -> int:
     }
 
     print("\n=== planted cases ===")
-    failures = []
+    failures = check_cashflow_oneoff()
     for t, want in expected.items():
         present = t in idx.index
         got = bool(idx.loc[t, "passes"]) if present else False

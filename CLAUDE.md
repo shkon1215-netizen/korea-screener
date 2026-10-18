@@ -101,6 +101,37 @@ column-name mismatch produces silent all-NaN merges rather than an error.
     bar stays visible. `--abs-strict-financials` restores the strict reading
     and yields zero financials.
 
+
+## Cash flow, shareholder yield and the one-off guard (added 2026-10-18)
+
+Added to all eight screeners at once, from the US build. Source: yfinance's cash-flow statement, in the same call that already fetches EBITDA (`providers_naver_kr.cashflow_fields`; cache key `fin2_`).
+
+- **P/FCF is a fourth peer metric** - market value over the latest filed
+  free cash flow (operating cash flow less capex), in the reporting
+  currency. Missing for financials, as EV/EBITDA is (invariant 6), and for a
+  negative free cash flow. The relative rule is unchanged: 20% below peers
+  on at least two of the metrics a company has, so with four metrics a name
+  has more ways to qualify.
+- **The outright screen's payout test is the shareholder yield** -
+  dividends plus buybacks less shares issued, over market value. The 2%
+  floor is the user's, unchanged. A company buying back only what it issues
+  to employees gets no credit; where no cash-flow statement was filed the
+  dividend yield stands in (`abs_payout_from_dividends_only` counts them).
+  Measured in the US: the dividend floor alone cut 89 cheap, profitable
+  names to 46.
+- **One-off guard.** On the latest FILED year (Korea's PER is struck on filed EPS): Naver's 당기순이익 against 영업이익: net profit above 1.5x operating profit
+  after a 24% tax rate, where the earlier filed years do NOT show the same
+  gap, is treated as below-the-line (a tax credit, an investment gain, an
+  asset sale). The row's P/E and EPS - and so its ROE - are restated on
+  operating profit after tax BEFORE the peer medians are built; an operating
+  loss under a reported profit leaves no P/E. Tagged `one-off`, never
+  dropped. A gap present every year (an equity-method holding, a trading
+  house) is structural and spared; financials are exempt. Measured cases:
+  Lyft 21.9x (tax allowance release), Rigel 5.2x, Alphabet 2.2x (gains on
+  stakes); ordinary companies 1.0-1.2x (Microsoft 1.19, Apple 1.13);
+  Mitsubishi Corporation 2.1x every year (spared). `--no-oneoff-guard`
+  scores earnings as reported.
+
 ## Known gaps (ranked by value of fixing)
 
 1. **Industry classification comes from yfinance**, not KRX 업종 or WICS.

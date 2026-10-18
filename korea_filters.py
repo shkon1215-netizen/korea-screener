@@ -88,6 +88,80 @@ def apply_admin_issue_filter(df: pd.DataFrame, admin_names: set) -> tuple[pd.Dat
     return df[~hit].copy(), {"dropped_admin_issue": n}
 
 
+def _fin(df: pd.DataFrame) -> pd.Series:
+    return df.get("sector", pd.Series("", index=df.index)).fillna("") \
+             .astype(str).str.contains("Financial", case=False)
+
+
+def add_cashflow_metrics(df: pd.DataFrame) -> tuple[pd.DataFrame, dict]:
+    """P/FCF (a fourth peer metric) and the shareholder yield, from the latest
+    filed cash-flow statement (providers_naver_kr.cashflow_fields).
+
+    Market cap over the filed free cash flow, both in won. Missing for
+    financials, as EV/EBITDA is (invariant 6). The shareholder yield is
+    dividends plus buybacks less shares issued - 자사주 매입 counts, which
+    the dividend yield alone never did.
+    """
+    df = df.copy()
+    mv = pd.to_numeric(df.get("market_cap_local"), errors="coerce")
+    fcf = pd.to_numeric(df.get("lf_fcf"), errors="coerce")
+    pfcf = (mv / fcf).where((fcf > 0) & (mv > 0))
+    lo, hi = K.METRIC_BOUNDS["price_to_fcf"]
+    df["price_to_fcf"] = pfcf.where((pfcf >= lo) & (pfcf <= hi)).where(~_fin(df))
+    paid = (pd.to_numeric(df.get("lf_div_paid"), errors="coerce")
+            + pd.to_numeric(df.get("lf_buyback"), errors="coerce")
+            - pd.to_numeric(df.get("lf_issuance"), errors="coerce"))
+    df["sh_yield"] = (paid / mv * 100.0).where(mv > 0)
+    return df, {"cashflow_known": int(fcf.notna().sum()),
+                "pfcf_valid": int(df["price_to_fcf"].notna().sum()),
+                "sh_yield_known": int(df["sh_yield"].notna().sum())}
+
+
+def apply_oneoff_guard(df: pd.DataFrame, cfg: K.ScreenConfig) -> tuple[pd.DataFrame, dict]:
+    """Earnings from below the operating line, capped.
+
+    Korea's PER is today's price over the latest FILED EPS, so the test is
+    on that same filed year: 당기순이익 above ONEOFF_RATIO times 영업이익 after
+    tax. It fires only where the earlier filed years do not show the same
+    gap - a holding company's equity-method income is its structure, not a
+    one-off. Financials are exempt. A flagged row's PER and EPS (and with it
+    the ROE) are restated on operating profit after tax before the peer
+    medians are built; an operating loss under a reported profit leaves no
+    PER. The row is tagged; nothing is dropped. See the US build for the
+    measured cases (Lyft, Mitsubishi Corporation).
+    """
+    df = df.copy()
+    tax = cfg.oneoff_tax_pct / 100.0
+    n = lambda c: pd.to_numeric(df.get(c, pd.Series(np.nan, index=df.index)),  # noqa: E731
+                                errors="coerce")
+    nps = [n(f"np_y{i}") for i in (1, 2, 3)]
+    ops = [n(f"op_y{i}") for i in (1, 2, 3)]
+    # the latest filed year is the highest index with a figure
+    ni = nps[2].where(nps[2].notna(), nps[1].where(nps[1].notna(), nps[0]))
+    op = ops[2].where(nps[2].notna(), ops[1].where(nps[1].notna(), ops[0]))
+    latest = np.where(nps[2].notna(), 3, np.where(nps[1].notna(), 2, 1))
+    cap = op * (1 - tax)
+    ratio = (ni / cap).where(cap > 0)
+    ratio = ratio.where(~((op <= 0) & (ni > 0)), np.inf)
+    earlier = []
+    for i in (1, 2):
+        r = (nps[i - 1] / (ops[i - 1] * (1 - tax))).where(ops[i - 1] > 0)
+        earlier.append(r.where(latest > i))
+    hist = pd.concat(earlier, axis=1).median(axis=1, skipna=True)
+    structural = hist > cfg.oneoff_ratio
+    flag = (~_fin(df) & (ni > 0) & (ratio > cfg.oneoff_ratio) & ~structural
+            & cfg.oneoff_guard)
+    k = (cap.clip(lower=0) / ni).where(flag)
+    eps, pe = n("trailing_eps"), n("trailing_pe")
+    df["trailing_eps"] = eps.where(~flag, eps * k)
+    df["trailing_pe"] = pe.where(~flag, (pe / k).where(k > 0))
+    df["oneoff_ratio"] = ratio.replace(np.inf, np.nan)
+    df["oneoff_capped"] = flag
+    df["oneoff_structural"] = structural & (ratio > cfg.oneoff_ratio) & ~_fin(df)
+    return df, {"oneoff_capped": int(flag.sum()),
+                "oneoff_structural_spared": int(df["oneoff_structural"].sum())}
+
+
 def add_valueup_flags(df: pd.DataFrame) -> pd.DataFrame:
     """Flag the KRX low-PBR disclosure criterion.
 
@@ -173,7 +247,13 @@ def apply_absolute_screen(df: pd.DataFrame, cfg: K.ScreenConfig) -> tuple[pd.Dat
     pbr = pd.to_numeric(df.get("price_to_book"), errors="coerce")
     ev = pd.to_numeric(df.get("ev_to_ebitda"), errors="coerce")
     roe = pd.to_numeric(df.get("roe_pct"), errors="coerce")
-    dy = pd.to_numeric(df.get("div_yield"), errors="coerce")
+    # The payout test is the SHAREHOLDER yield - dividends plus net buybacks
+    # over market cap (add_cashflow_metrics) - with the dividend yield where
+    # no cash-flow statement was filed. The user's 2% floor stays.
+    shy = pd.to_numeric(df.get("sh_yield", pd.Series(np.nan, index=df.index)),
+                        errors="coerce")
+    dy = shy.where(shy.notna(), pd.to_numeric(df.get("div_yield"), errors="coerce"))
+    df["payout_yield"] = dy
     fin = df.get("sector", pd.Series("", index=df.index)).fillna("") \
             .str.contains("Financial", case=False)
 
@@ -217,7 +297,8 @@ def apply_absolute_screen(df: pd.DataFrame, cfg: K.ScreenConfig) -> tuple[pd.Dat
         f"abs_pbr_under_{cfg.abs_max_pbr:g}": int(df["abs_pbr_ok"].sum()),
         f"abs_ev_under_{cfg.abs_max_ev_ebitda:g}": int(df["abs_ev_ok"].sum()),
         "abs_pbr_below_fair": int(df["abs_pbr_vs_roe_ok"].sum()),
-        f"abs_div_over_{cfg.abs_min_div_yield:g}pct": int(df["abs_div_ok"].sum()),
+        f"abs_payout_over_{cfg.abs_min_div_yield:g}pct": int(df["abs_div_ok"].sum()),
+        "abs_payout_from_dividends_only": int((df["abs_div_ok"] & shy.isna()).sum()),
         "abs_passing": int(absp.sum()),
         "abs_via_financial_carveout": int((absp & df["abs_via_carveout"]).sum()),
         "abs_new_vs_relative": int((absp & ~rel).sum()),
@@ -365,6 +446,8 @@ def korea_output_columns(cfg: K.ScreenConfig) -> list[str]:
     cols += ["screen", "passes_any", "abs_passes", "abs_pbr_ok", "abs_ev_ok",
              "abs_pbr_vs_roe_ok", "abs_div_ok", "abs_roe_ok", "abs_fair_pbr",
              "abs_via_carveout",
+             "oneoff_capped", "oneoff_ratio", "oneoff_structural",
+             "sh_yield", "payout_yield", "lf_fcf", "lf_div_paid", "lf_buyback", "lf_issuance",
              "roe_pct", "roe_ok", "roe_tier", "div_yield", "pays_dividend",
              "pbr_below_1", "pbr_bottom20_industry", "is_holdco",
              "n_valid_metrics", "n_metrics_passing", "metrics_passing",

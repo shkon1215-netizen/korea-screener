@@ -38,8 +38,9 @@ FUNNEL_STEPS = [
 TABLE_COLS = [
     ("ticker", "Code", "l"), ("name", "Name", "l"), ("industry", "업종 industry", "l"),
     ("mcap_musd", "Cap $m", ""), ("trailing_pe", "PER", ""), ("price_to_book", "PBR", ""),
-    ("ev_to_ebitda", "EV/EBITDA", ""), ("roe_pct", "ROE %", ""),
-    ("div_yield", "Yield %", ""), ("avg_discount", "Discount", ""),
+    ("ev_to_ebitda", "EV/EBITDA", ""), ("price_to_fcf", "P/FCF", ""), ("roe_pct", "ROE %", ""),
+    ("div_yield", "Yield %", ""), ("sh_yield", "Sh. yield %", ""),
+    ("avg_discount", "Discount", ""),
     ("rev_cagr", "Revenue 3y", ""), ("ebitda_cagr", "EBITDA 3y", ""),
     ("np_cagr", "Net profit 3y", ""),
     ("hist_avg_disc", "vs own 5y", ""),
@@ -51,7 +52,7 @@ ABS_TESTS = [
     ("abs_pbr_ok", "PBR below {abs_max_pbr:g}"),
     ("abs_ev_ok", "EV/EBITDA below {abs_max_ev_ebitda:g}"),
     ("abs_pbr_vs_roe_ok", "PBR below fair value (ROE ÷ {abs_cost_of_equity_pct:g}% CoE)"),
-    ("abs_div_ok", "Dividend yield {abs_min_div_yield:g}% or better"),
+    ("abs_div_ok", "Shareholder yield {abs_min_div_yield:g}% or better"),
     ("abs_roe_ok", "ROE {min_roe_pct:g}% or better"),
 ]
 
@@ -94,6 +95,20 @@ def _records(df: pd.DataFrame) -> list[dict]:
             "disc_pe": _f(r.get("trailing_pe_discount"), 6),
             "disc_pb": _f(r.get("price_to_book_discount"), 6),
             "disc_ev": _f(r.get("ev_to_ebitda_discount"), 6),
+            # P/FCF is the fourth peer metric: market value over the last
+            # filed free cash flow. Missing for financials, like EV/EBITDA.
+            "price_to_fcf": _f(r.get("price_to_fcf"), 6),
+            "disc_fcf": _f(r.get("price_to_fcf_discount"), 6),
+            # Shareholder yield: dividends + buybacks - shares issued, over
+            # market value. payout_yield is what the outright screen tests:
+            # the shareholder yield, or the dividend yield where no cash-flow
+            # statement was filed.
+            "sh_yield": _f(r.get("sh_yield"), 6),
+            "payout_yield": _f(r.get("payout_yield"), 6),
+            # Earnings from below the operating line, capped - the P/E and
+            # ROE on this row are already on operating profit after tax.
+            "oneoff": bool(r.get("oneoff_capped") == True),  # noqa: E712
+            "oneoff_ratio": _f(r.get("oneoff_ratio"), 2),
             "fin": bool(str(r.get("sector", "") or "").lower().find("financial") >= 0),
             # Three-year history, oldest first, in 억원. The yearly values
             # travel with the rate so a name whose CAGR is undefined (negative
@@ -638,7 +653,7 @@ _TEMPLATE = """
         <input type="number" id="t_per" min="0" step="1" placeholder="off"></div>
       <div class="tg"><label for="t_roe">ROE at least %</label>
         <input type="number" id="t_roe" step="1"></div>
-      <div class="tg"><label for="t_div">Dividend at least %</label>
+      <div class="tg"><label for="t_div">Shareholder yield at least %</label>
         <input type="number" id="t_div" min="0" step="0.5"></div>
       <div class="tg"><label for="t_coe">Cost of equity %</label>
         <input type="number" id="t_coe" min="1" step="0.5"></div>
@@ -699,6 +714,23 @@ _TEMPLATE = """
     holdcos with bank holdcos in one peer group, and suppresses EV/EBITDA for
     both — enterprise value is meaningless for a bank, but not for an operating
     company. Holdcos are tagged so you can see which rows this touches.</p>
+    <p><b>Cash flow and buybacks count.</b> P/FCF - market value over the
+    last filed free cash flow - is a fourth peer metric beside the other
+    three, and the relative test still asks for 20% below peers on at least
+    two of the metrics a company has. The outright screen's payout test is
+    the <b>shareholder yield</b>: dividends plus buybacks less shares issued,
+    over market value, so a company returning cash by buying back stock is
+    not failed for a low dividend, and one buying back only what it issues
+    to employees gets no credit. Where no cash-flow statement was filed the
+    dividend yield stands in.</p>
+    <p><b>A <span class="tag">one-off</span> tag means the P/E was restated.</b>
+    When net profit runs well above operating profit after tax - a tax
+    credit, an investment gain, an asset sale - and the company's earlier
+    years do not show the same gap, the row is scored on operating profit
+    after tax instead. Its P/E and ROE in the table are already on that
+    basis; hover the tag for the size of the gap. A company whose profit
+    always sits above its operating line (an equity-method holding) is left
+    alone.</p>
     <p><b id="livenote"></b></p>
     <p>Peer medians are winsorized and exclude the stock itself. A metric with
     fewer than <span id="mp"></span> peers is left unscored rather than
@@ -827,7 +859,7 @@ function paintTests() {
     n(r => r.trailing_pe !== null && r.trailing_pe < T.per)]);
   if (T.fair) tests.push([`PBR below fair value (ROE ÷ ${T.coe}% CoE)`,
     n(r => r.ev.tests.fair)]);
-  if (T.div !== null) tests.push(["Dividend yield " + T.div + "% or better",
+  if (T.div !== null) tests.push(["Shareholder yield " + T.div + "% or better",
     n(r => r.ev.tests.div)]);
   if (T.roe !== null) tests.push(["ROE " + T.roe + "% or better", n(r => r.ev.tests.roe)]);
 
@@ -884,6 +916,7 @@ function paintAll() {
 
 /* ---- table ----------------------------------------------------------- */
 const NUM = new Set(["mcap_musd","trailing_pe","price_to_book","ev_to_ebitda",
+                     "price_to_fcf","sh_yield",
                      "roe_pct","div_yield","avg_discount"]);
 let sortKey = "avg_discount", sortDir = -1;
 let growthMode = "yoy";
@@ -970,7 +1003,8 @@ function writeControls(v) {
    and apply_absolute_screen, including the rule that a missing value fails a
    test it is subject to - unknown is not the same as passing. */
 function evaluate(r) {
-  const ds = [r.disc_pe, r.disc_pb, r.disc_ev].filter(d => d !== null);
+  const ds = [r.disc_pe, r.disc_pb, r.disc_ev, r.disc_fcf]
+    .filter(d => d !== null && d !== undefined);
   const nPass = T.disc === null ? ds.length
               : ds.filter(d => d >= T.disc / 100).length;
   const roeOk = T.roe === null || (r.roe_pct !== null && r.roe_pct >= T.roe);
@@ -979,7 +1013,11 @@ function evaluate(r) {
   const pbrOk = T.pbr === null || (r.price_to_book !== null && r.price_to_book < T.pbr);
   const evOk  = T.ev  === null || (r.ev_to_ebitda !== null && r.ev_to_ebitda < T.ev);
   const perOk = T.per === null || (r.trailing_pe !== null && r.trailing_pe < T.per);
-  const divOk = T.div === null || (r.div_yield !== null && r.div_yield >= T.div);
+  // Shareholder yield, the dividend yield where no cash flow was filed -
+  // the same fallback Python applied (payout_yield).
+  const py = (r.payout_yield !== null && r.payout_yield !== undefined)
+    ? r.payout_yield : r.div_yield;
+  const divOk = T.div === null || (py !== null && py !== undefined && py >= T.div);
   const fairOk = !T.fair || (r.price_to_book !== null && r.roe_pct !== null
                              && r.price_to_book < r.roe_pct / T.coe);
   let core = pbrOk && evOk;
@@ -1137,7 +1175,8 @@ function cell(r, k) {
   if (k === "ticker") return `<span style="color:var(--ink-3)">${esc(v)}</span>`;
   if (k === "name") {
     const tags = (r.holdco ? '<span class="tag">holdco</span>' : "")
-               + (r.pbr20 ? '<span class="tag">pbr b20</span>' : "");
+               + (r.pbr20 ? '<span class="tag">pbr b20</span>' : "")
+               + (r.oneoff ? `<span class="tag" title="Net profit was ${r.oneoff_ratio === null ? 'above' : r.oneoff_ratio.toFixed(1) + 'x'} operating profit after tax, which the company's earlier years do not show: P/E and ROE are on operating profit after tax">one-off</span>` : "");
     return `<span class="nm"><span class="nmt">${esc(v)}</span>${tags}</span>`;
   }
   if (k === "industry") return `<span class="ind">${esc(v || "—")}</span>`;

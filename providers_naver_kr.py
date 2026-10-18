@@ -201,7 +201,8 @@ def fetch_financials(tickers: list[str], cache=None, delay: float = 0.12,
     def ebitda_part(code: str) -> dict:
         for suffix in (".KS", ".KQ"):
             try:
-                stmt = yf.Ticker(f"{code}{suffix}").income_stmt
+                tk = yf.Ticker(f"{code}{suffix}")
+                stmt = tk.income_stmt
                 if stmt is None or stmt.empty:
                     continue
                 row = next((i for i in stmt.index if str(i) == "EBITDA"), None)
@@ -216,6 +217,13 @@ def fetch_financials(tickers: list[str], cache=None, delay: float = 0.12,
                 series = [_num(stmt.loc[row, c]) / 1e8 for c in cols]
                 out = {f"ebitda_y{i}": v for i, v in enumerate(series, 1)}
                 out["ebitda_cagr"] = cagr(series)
+                # The latest filed year's free cash flow and shareholder
+                # payouts, in won, from the same Ticker - P/FCF and the
+                # shareholder yield (korea_filters.add_cashflow_metrics).
+                try:
+                    out.update(cashflow_fields(tk.cashflow, stmt.columns[0]))
+                except Exception:
+                    pass
                 return out
             except Exception:
                 continue
@@ -223,7 +231,7 @@ def fetch_financials(tickers: list[str], cache=None, delay: float = 0.12,
 
     def one(code: str) -> dict:
         if cache is not None:
-            hit = cache.get(f"fin_{code}")
+            hit = cache.get(f"fin2_{code}")
             if hit:
                 return {**hit, "ticker": code}
         rec = {"ticker": code}
@@ -237,7 +245,7 @@ def fetch_financials(tickers: list[str], cache=None, delay: float = 0.12,
         except Exception:
             pass
         if cache is not None:
-            cache.set(f"fin_{code}", {k: (None if (isinstance(v, float) and not
+            cache.set(f"fin2_{code}", {k: (None if (isinstance(v, float) and not
                                                    np.isfinite(v)) else v)
                                       for k, v in rec.items() if k != "ticker"})
         return rec
@@ -258,6 +266,51 @@ def fetch_financials(tickers: list[str], cache=None, delay: float = 0.12,
         log.warning("financials missing for %d of %d names - check for "
                     "rate limiting or an API change", failed, len(tickers))
     return pd.DataFrame(out)
+
+
+# Cash-flow rows (the US build's), latest filed year only. Yahoo signs
+# outflows negative; they are stored as positive amounts, in won.
+CF_ROWS = {
+    "fcf": ("Free Cash Flow",),
+    "ocf": ("Operating Cash Flow", "Cash Flow From Continuing Operating Activities"),
+    "capex": ("Capital Expenditure",),
+    "div_paid": ("Cash Dividends Paid", "Common Stock Dividend Paid"),
+    "buyback": ("Repurchase Of Capital Stock", "Common Stock Payments"),
+    "issuance": ("Issuance Of Capital Stock", "Common Stock Issuance"),
+}
+
+
+def cashflow_fields(cf: pd.DataFrame | None, lf) -> dict:
+    """Free cash flow and shareholder payouts for the filed year `lf`, as
+    positive amounts in won. Pure. A year with no cash-flow column is
+    missing, never zero; within a filed column, an absent payout row is zero
+    (the statement says nothing was paid)."""
+    out = {"lf_fcf": np.nan, "lf_div_paid": np.nan, "lf_buyback": np.nan,
+           "lf_issuance": np.nan}
+    if cf is None or cf.empty or lf not in cf.columns:
+        return out
+
+    def val(key):
+        for name in CF_ROWS[key]:
+            if name in cf.index:
+                v = _num(cf.loc[name, lf])
+                if np.isfinite(v):
+                    return v
+        return np.nan
+    ocf = val("ocf")
+    if not np.isfinite(ocf):
+        return out
+    fcf = val("fcf")
+    if not np.isfinite(fcf):
+        capex = val("capex")
+        fcf = ocf + capex if np.isfinite(capex) else np.nan
+
+    def paid(key):
+        v = val(key)
+        return abs(v) if np.isfinite(v) else 0.0
+    out.update({"lf_fcf": fcf, "lf_div_paid": paid("div_paid"),
+                "lf_buyback": paid("buyback"), "lf_issuance": paid("issuance")})
+    return out
 
 
 WR_BASE = "https://navercomp.wisereport.co.kr/v2/company"

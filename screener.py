@@ -31,7 +31,10 @@ def sanitize_metrics(df: pd.DataFrame, cfg: ScreenConfig) -> pd.DataFrame:
     df = df.copy()
     for m in cfg.metrics:
         lo, hi = METRIC_BOUNDS[m]
-        v = pd.to_numeric(df.get(m), errors="coerce")
+        # A metric with no column at all (P/FCF on a run without statements)
+        # is missing on every row, not a crash.
+        v = pd.to_numeric(df[m], errors="coerce") if m in df.columns \
+            else pd.Series(np.nan, index=df.index)
         df[m] = v.where((v > 0) & (v >= lo) & (v <= hi))
 
     # EV/EBITDA is meaningless for banks and insurers (no meaningful EV).
