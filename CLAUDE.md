@@ -126,10 +126,13 @@ Added to all eight screeners at once, from the US build. Source: yfinance's cash
   operating profit after tax BEFORE the peer medians are built; an operating
   loss under a reported profit leaves no P/E. Tagged `one-off`, never
   dropped. A gap present every year (an equity-method holding, a trading
-  house) is structural and spared; financials are exempt. Measured cases:
-  Lyft 21.9x (tax allowance release), Rigel 5.2x, Alphabet 2.2x (gains on
-  stakes); ordinary companies 1.0-1.2x (Microsoft 1.19, Apple 1.13);
-  Mitsubishi Corporation 2.1x every year (spared). `--no-oneoff-guard`
+  house) is structural and spared; financials are exempt. Measured in the
+  US on four quarters, 2026-10-16: Lyft (operating loss, tax allowance
+  release), Rigel 4.9x, Teradata 4.8x, Boyd 3.2x (FanDuel stake sale), FIS
+  2.2x (Worldpay sale), Alphabet 2.2x (gains on stakes); ordinary companies
+  1.1-1.2x (Microsoft 1.15, Apple 1.11, Qualcomm 1.20, Deckers 1.08). The
+  structural rule is written for names like Mitsubishi Corporation (~2x on
+  one reading, not re-measured on four quarters). `--no-oneoff-guard`
   scores earnings as reported.
 
 ## Known gaps (ranked by value of fixing)
