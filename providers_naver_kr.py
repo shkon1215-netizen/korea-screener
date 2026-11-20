@@ -41,6 +41,7 @@ from __future__ import annotations
 
 import io
 import logging
+import os
 import re
 import time
 
@@ -72,6 +73,53 @@ BOARD_KIND = {"KOSPI": "stockMkt", "KOSDAQ": "kosdaqMkt"}
 # screener.sanitize_metrics suppresses EV/EBITDA wherever `sector` matches
 # /Financial/ (invariant 6). KIND's 업종 is Korean, so map it across.
 _FIN_TOKENS = ("은행", "금융", "보험", "증권", "저축", "신용", "여신", "자산운용")
+
+
+# Committed fallback for KIND's 업종 table. KIND is a third party that can and
+# does refuse requests; 업종 changes rarely, so a dated copy is worth far more
+# than an empty frame. Regenerated automatically by any healthy local run.
+KIND_SNAPSHOT = os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                             "data", "kind_industry.csv")
+# KOSPI alone returns ~830 rows and KOSPI+KOSDAQ ~2,500. Anything under this is
+# a broken fetch, not a quiet market.
+KIND_SNAPSHOT_MIN_ROWS = 400
+
+
+def _industry_snapshot_load() -> pd.DataFrame:
+    try:
+        df = pd.read_csv(KIND_SNAPSHOT, dtype={"ticker": str})
+        return df[["ticker", "industry", "sector"]].fillna("")
+    except Exception:
+        return pd.DataFrame(columns=["ticker", "industry", "sector"])
+
+
+def _industry_snapshot_stamp() -> str:
+    try:
+        from datetime import datetime
+        return datetime.fromtimestamp(
+            os.path.getmtime(KIND_SNAPSHOT)).strftime("%Y-%m-%d")
+    except Exception:
+        return ""
+
+
+def _industry_snapshot_save(df: pd.DataFrame) -> None:
+    """Merge into the snapshot; never replace it.
+
+    Each board is a separate run with its own `--board`, so a plain write
+    would leave the file holding whichever board finished last - and the
+    other board's fallback would then be a file with none of its tickers in
+    it. Merging on ticker keeps both. A delisted code lingers, which costs
+    nothing: the snapshot is joined to a live roster, so rows nobody asks
+    about are never read.
+    """
+    try:
+        merged = pd.concat([_industry_snapshot_load(), df], ignore_index=True)
+        # Later rows win, so a fresh fetch updates a reclassified ticker.
+        merged = merged.drop_duplicates("ticker", keep="last").sort_values("ticker")
+        os.makedirs(os.path.dirname(KIND_SNAPSHOT), exist_ok=True)
+        merged.to_csv(KIND_SNAPSHOT, index=False, encoding="utf-8")
+    except Exception as e:
+        log.debug("industry snapshot not written: %s", e)
 
 
 KIND_ADMIN = "https://kind.krx.co.kr/investwarn/adminissue.do"
@@ -557,13 +605,33 @@ class NaverKindProvider:
                 log.info("KIND %s: %d industry rows", board, len(t))
             except Exception as e:
                 log.error("KIND industry fetch failed for %s: %s", board, e)
-        if not frames:
-            self._industry = pd.DataFrame(columns=["ticker", "industry", "sector"])
-            return self._industry
-        df = pd.concat(frames, ignore_index=True).drop_duplicates("ticker")
-        df["industry"] = df["업종"].astype(str).str.strip()
-        df["sector"] = df["industry"].map(_fin_sector)
-        self._industry = df[["ticker", "industry", "sector"]]
+        if frames:
+            df = pd.concat(frames, ignore_index=True).drop_duplicates("ticker")
+            df["industry"] = df["업종"].astype(str).str.strip()
+            df["sector"] = df["industry"].map(_fin_sector)
+            df = df[["ticker", "industry", "sector"]]
+        else:
+            df = pd.DataFrame(columns=["ticker", "industry", "sector"])
+
+        snap = _industry_snapshot_load()
+        if len(df) >= KIND_SNAPSHOT_MIN_ROWS:
+            # Healthy fetch: keep the snapshot current. In CI this writes to an
+            # ephemeral workspace and is thrown away, which is fine - the
+            # committed copy only moves when someone runs locally and commits.
+            _industry_snapshot_save(df)
+        elif not snap.empty:
+            # 2026-11-18: KIND answered 403 for both boards. Industry came back
+            # empty, every row was dropped at the industry gate, no CSV was
+            # written, and build_site.py then failed two steps later with "no
+            # result files found" - a message pointing at the wrong thing.
+            # 업종 changes rarely, so yesterday's classifications are a far
+            # better answer than none.
+            log.warning("KIND returned %d industry rows; falling back to the "
+                        "committed snapshot (%d rows, %s). Classifications may "
+                        "be stale.", len(df), len(snap),
+                        _industry_snapshot_stamp() or "undated")
+            df = snap
+        self._industry = df
         return self._industry
 
     # -- KRXProvider-compatible surface --------------------------------

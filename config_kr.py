@@ -1,7 +1,7 @@
 """Configuration for the Korea (KRX) valuation screener."""
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 # P/FCF is the fourth: market cap over the last filed free cash flow
 # (korea_filters.add_cashflow_metrics). The relative test is unchanged -
@@ -76,6 +76,19 @@ class ScreenConfig:
 
     # 관리종목. KIND publishes the list free, but by company NAME only.
     exclude_admin_issue: bool = True
+
+    # --- Sanity tripwires ---
+    # Every input here is scraped from a third party that can answer 403, or
+    # half-answer. A partial scrape is the dangerous case: a total failure
+    # stops the run, but a thin one publishes a short list that looks like a
+    # real result. These floors are deliberately well below the observed
+    # counts (KOSPI ~945 stocks, KOSDAQ ~1,820) so an ordinary market move
+    # never trips them and a broken fetch always does.
+    sanity_min_roster: dict = field(default_factory=lambda: {
+        "KOSPI": 600, "KOSDAQ": 1100})
+    # Share of size-gate survivors that must carry an 업종. Below this the peer
+    # medians are being built from a fraction of the market.
+    sanity_min_industry_frac: float = 0.50
 
     # --- Historical-self screen ---
     # Cheap against the company's OWN five filed years, not its peers or a

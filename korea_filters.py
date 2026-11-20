@@ -56,6 +56,53 @@ def apply_korea_filters(df: pd.DataFrame, cfg: K.ScreenConfig) -> tuple[pd.DataF
     return df.copy(), stats
 
 
+class UniverseTooThin(RuntimeError):
+    """A scrape came back short enough that the run would be misleading."""
+
+
+def check_roster(df: pd.DataFrame, cfg: K.ScreenConfig) -> None:
+    """Fail at the scrape, not three steps downstream.
+
+    When KIND answered 403 on 2026-11-18 the run did not stop. Industry came
+    back empty, the industry gate dropped every row, no CSV was written, and
+    `build_site.py` failed with "no result files found" - a message that
+    points at the build, not at KIND. Worse is the near miss: had KIND
+    returned HALF its rows the run would have published a short list that
+    looks exactly like a real one.
+    """
+    if df.empty:
+        raise UniverseTooThin("roster is empty - the listing scrape returned "
+                              "nothing at all")
+    counts = df["board"].value_counts().to_dict() if "board" in df else {}
+    for board, floor in (cfg.sanity_min_roster or {}).items():
+        if board not in cfg.boards:
+            continue
+        got = int(counts.get(board, 0))
+        if got < floor:
+            raise UniverseTooThin(
+                f"{board} roster has {got} stocks, below the {floor} floor. "
+                f"That is a broken or partial listing scrape, not a quiet "
+                f"market - refusing to publish a short list. Override with "
+                f"--skip-sanity once you have checked the source.")
+    log.info("roster sane: %s", counts)
+
+
+def check_industry_coverage(df: pd.DataFrame, cfg: K.ScreenConfig) -> None:
+    """Peer medians are only meaningful if most of the cohort has an 업종."""
+    if df.empty:
+        return
+    have = df["industry"].fillna("").ne("").sum() if "industry" in df else 0
+    frac = have / len(df)
+    if frac < cfg.sanity_min_industry_frac:
+        raise UniverseTooThin(
+            f"only {have} of {len(df)} size-gate survivors ({frac:.0%}) have an "
+            f"업종, below the {cfg.sanity_min_industry_frac:.0%} floor. Peer "
+            f"medians built on this would be noise. Usually KIND refusing "
+            f"requests - check the snapshot fallback. Override with "
+            f"--skip-sanity.")
+    log.info("industry coverage: %d of %d (%.0f%%)", have, len(df), frac * 100)
+
+
 def apply_halt_filter(df: pd.DataFrame) -> tuple[pd.DataFrame, dict]:
     """Drop 거래정지 (suspended) lines.
 

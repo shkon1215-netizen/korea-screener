@@ -312,6 +312,36 @@ to 9.
 One WiseReport session token (`encparam`) serves every ticker; 40 names came
 back in 8s with 6 workers and no throttling.
 
+## When a third party refuses: snapshot, then tripwire
+
+On 2026-11-18 KIND answered **403** to both the 업종 and the 관리종목 lookups.
+Nothing crashed. Industry came back empty, the industry gate dropped every
+row, no CSV was written, and `build_site.py` failed two steps later with "no
+result files found" - a message pointing at the build rather than at KIND.
+Run #70 failed; #69 and #71 passed, because KIND came back on its own.
+
+Two defences, and they do different jobs:
+
+- **`data/kind_industry.csv` is a committed fallback.** 업종 changes rarely, so
+  yesterday's classifications beat none. Any healthy run (>= 400 rows) refreshes
+  it; a thin or failed fetch loads it and logs loudly that the data may be
+  stale. It **merges** rather than overwrites - each board is a separate run,
+  so a plain write would leave the file holding whichever board finished last
+  and give the other board a fallback with none of its tickers in it.
+  Verified by forcing every KIND request to 403: 0 rows live, 2,662 recovered.
+- **`check_roster` and `check_industry_coverage` are tripwires.** The outage is
+  not the dangerous case - a total failure stops the run. The dangerous case is
+  a HALF answer, which publishes a short list that looks exactly like a real
+  one. The floors (KOSPI 600, KOSDAQ 1,100 stocks; 50% industry coverage) sit
+  well below observed counts (938 / 1,836 / 100%), so an ordinary market never
+  trips them. They raise `UniverseTooThin`, which exits **2** with a one-line
+  message instead of a traceback. `--skip-sanity` overrides once you have
+  checked the source.
+
+Keep the fallback and the tripwire both. The snapshot stops a KIND outage
+costing a day's run; the tripwire stops a partial scrape costing a day's
+trust.
+
 ## Publishing
 
 Live: https://shkon1215-netizen.github.io/korea-screener/ (KOSDAQ at

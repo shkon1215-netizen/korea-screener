@@ -214,6 +214,35 @@ def main() -> int:
                                "avg_discount", "pbr_bottom20_industry"]]
     print(hits.round(2).to_string(index=False) if not hits.empty else "  (none)")
 
+    # Tripwires. A scrape that half-answers is worse than one that dies:
+    # it publishes a short list that looks real. These must fire.
+    print('\n' + '=== sanity tripwires ===')
+    scfg = ScreenConfig(boards=('KOSPI',))
+    cases = [
+        ('full roster (938)', True,
+         lambda: KF.check_roster(pd.DataFrame({'ticker': ['x'] * 938,
+                                               'board': ['KOSPI'] * 938}), scfg)),
+        ('half a roster (300)', False,
+         lambda: KF.check_roster(pd.DataFrame({'ticker': ['x'] * 300,
+                                               'board': ['KOSPI'] * 300}), scfg)),
+        ('empty roster', False,
+         lambda: KF.check_roster(pd.DataFrame(columns=['ticker', 'board']), scfg)),
+        ('industry 100%', True,
+         lambda: KF.check_industry_coverage(pd.DataFrame({'industry': ['기계'] * 50}), scfg)),
+        ('industry 0% (the 2026-11-18 case)', False,
+         lambda: KF.check_industry_coverage(pd.DataFrame({'industry': [''] * 50}), scfg)),
+    ]
+    for label, should_pass, fn in cases:
+        try:
+            fn(); tripped = False
+        except KF.UniverseTooThin:
+            tripped = True
+        ok = (not tripped) == should_pass
+        print('  %s %-36s %s' % ('OK  ' if ok else 'FAIL', label,
+                                 'passed' if not tripped else 'tripped'))
+        if not ok:
+            failures.append('tripwire_' + label.split()[0])
+
     print("\n" + ("ALL CHECKS PASSED" if not failures else f"FAILURES: {failures}"))
     return 1 if failures else 0
 

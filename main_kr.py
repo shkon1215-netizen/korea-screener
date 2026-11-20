@@ -63,6 +63,9 @@ def parse_args() -> argparse.Namespace:
                    help="absolute screen: dividend yield %% floor; 0 disables")
     p.add_argument("--no-financials", action="store_true",
                    help="skip the 3-year revenue/EBITDA/net-profit history")
+    p.add_argument("--skip-sanity", action="store_true",
+                   help="publish even if the roster or industry coverage is "
+                        "below its floor")
     p.add_argument("--no-history", action="store_true",
                    help="skip the own-5-year-history screen")
     p.add_argument("--hist-discount", type=float, default=0.30,
@@ -134,6 +137,8 @@ def main() -> int:
     if roster.empty:
         log.error("empty roster - check pykrx install and network")
         return 1
+    if not a.skip_sanity:
+        KF.check_roster(roster, cfg)
     roster, kstats = KF.apply_korea_filters(roster, cfg)
 
     roster, hstats = KF.apply_halt_filter(roster)
@@ -176,6 +181,8 @@ def main() -> int:
     log.info("fetching industry + EV/EBITDA for %d names...", len(pre))
     enr = prov.enrich(pre["ticker"].tolist())
     pre = pre.merge(enr, on="ticker", how="left")
+    if not a.skip_sanity:
+        KF.check_industry_coverage(pre, cfg)
 
     # Three-year history. Also per-ticker, so it belongs here with the other
     # slow work - after the size gate, on survivors only (invariant 7).
@@ -314,4 +321,10 @@ def main() -> int:
 
 
 if __name__ == "__main__":
-    sys.exit(main())
+    try:
+        sys.exit(main())
+    except KF.UniverseTooThin as e:
+        # A tripwire, not a bug: say what is wrong in one line rather than
+        # burying it in a traceback the CI log will truncate.
+        print(f"\nSANITY CHECK FAILED: {e}", file=sys.stderr)
+        sys.exit(2)
